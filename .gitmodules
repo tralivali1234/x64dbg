@@ -7,3 +7,6 @@
 [submodule "src/dbg/btparser"]
 	path = src/dbg/btparser
 	url = https://github.com/x64dbg/btparser
+[submodule "src/dbg/concurrentqueue"]
+	path = src/dbg/concurrentqueue
+	url = https://github.com/cameron314/concurrentqueue.git
