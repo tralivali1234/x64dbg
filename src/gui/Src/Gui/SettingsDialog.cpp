@@ -69,6 +69,9 @@ void SettingsDialog::LoadSettings()
     settings.disasmUppercase = false;
     settings.disasmOnlyCipAutoComments = false;
     settings.disasmTabBetweenMnemonicAndArguments = false;
+    settings.disasmNoCurrentModuleText = false;
+    settings.disasm0xPrefixValues = false;
+    settings.disasmNoSourceLineAutoComments = false;
     settings.guiNoForegroundWindow = true;
 
     //Events tab
@@ -194,6 +197,9 @@ void SettingsDialog::LoadSettings()
     GetSettingBool("Disassembler", "TabbedMnemonic", &settings.disasmTabBetweenMnemonicAndArguments);
     GetSettingBool("Disassembler", "NoHighlightOperands", &settings.disasmNoHighlightOperands);
     GetSettingBool("Disassembler", "PermanentHighlightingMode", &settings.disasmPermanentHighlightingMode);
+    GetSettingBool("Disassembler", "NoCurrentModuleText", &settings.disasmNoCurrentModuleText);
+    GetSettingBool("Disassembler", "0xPrefixValues", &settings.disasm0xPrefixValues);
+    GetSettingBool("Disassembler", "NoSourceLineAutoComments", &settings.disasmNoSourceLineAutoComments);
     ui->chkArgumentSpaces->setChecked(settings.disasmArgumentSpaces);
     ui->chkMemorySpaces->setChecked(settings.disasmMemorySpaces);
     ui->chkUppercase->setChecked(settings.disasmUppercase);
@@ -201,6 +207,9 @@ void SettingsDialog::LoadSettings()
     ui->chkTabBetweenMnemonicAndArguments->setChecked(settings.disasmTabBetweenMnemonicAndArguments);
     ui->chkNoHighlightOperands->setChecked(settings.disasmNoHighlightOperands);
     ui->chkPermanentHighlightingMode->setChecked(settings.disasmPermanentHighlightingMode);
+    ui->chkNoCurrentModuleText->setChecked(settings.disasmNoCurrentModuleText);
+    ui->chk0xPrefixValues->setChecked(settings.disasm0xPrefixValues);
+    ui->chkNoSourceLinesAutoComments->setChecked(settings.disasmNoSourceLineAutoComments);
 
     //Gui tab
     GetSettingBool("Gui", "FpuRegistersLittleEndian", &settings.guiFpuRegistersLittleEndian);
@@ -210,6 +219,8 @@ void SettingsDialog::LoadSettings()
     GetSettingBool("Gui", "SidebarWatchLabels", &settings.guiSidebarWatchLabels);
     GetSettingBool("Gui", "NoForegroundWindow", &settings.guiNoForegroundWindow);
     GetSettingBool("Gui", "LoadSaveTabOrder", &settings.guiLoadSaveTabOrder);
+    GetSettingBool("Gui", "ShowGraphRva", &settings.guiShowGraphRva);
+    GetSettingBool("Gui", "ShowExitConfirmation", &settings.guiShowExitConfirmation);
     ui->chkFpuRegistersLittleEndian->setChecked(settings.guiFpuRegistersLittleEndian);
     ui->chkSaveColumnOrder->setChecked(settings.guiSaveColumnOrder);
     ui->chkNoCloseDialog->setChecked(settings.guiNoCloseDialog);
@@ -217,6 +228,8 @@ void SettingsDialog::LoadSettings()
     ui->chkSidebarWatchLabels->setChecked(settings.guiSidebarWatchLabels);
     ui->chkNoForegroundWindow->setChecked(settings.guiNoForegroundWindow);
     ui->chkSaveLoadTabOrder->setChecked(settings.guiLoadSaveTabOrder);
+    ui->chkShowGraphRva->setChecked(settings.guiShowGraphRva);
+    ui->chkShowExitConfirmation->setChecked(settings.guiShowExitConfirmation);
 
     //Misc tab
     if(DbgFunctions()->GetJit)
@@ -279,7 +292,13 @@ void SettingsDialog::LoadSettings()
     bJitAutoOld = settings.miscSetJITAuto;
 
     GetSettingBool("Misc", "Utf16LogRedirect", &settings.miscUtf16LogRedirect);
+    GetSettingBool("Misc", "UseLocalHelpFile", &settings.miscUseLocalHelpFile);
+    GetSettingBool("Misc", "QueryProcessCookie", &settings.miscQueryProcessCookie);
+    GetSettingBool("Misc", "QueryWorkingSet", &settings.miscQueryWorkingSet);
     ui->chkUtf16LogRedirect->setChecked(settings.miscUtf16LogRedirect);
+    ui->chkUseLocalHelpFile->setChecked(settings.miscUseLocalHelpFile);
+    ui->chkQueryProcessCookie->setChecked(settings.miscQueryProcessCookie);
+    ui->chkQueryWorkingSet->setChecked(settings.miscQueryWorkingSet);
 }
 
 void SettingsDialog::SaveSettings()
@@ -332,6 +351,9 @@ void SettingsDialog::SaveSettings()
     BridgeSettingSetUint("Disassembler", "TabbedMnemonic", settings.disasmTabBetweenMnemonicAndArguments);
     BridgeSettingSetUint("Disassembler", "NoHighlightOperands", settings.disasmNoHighlightOperands);
     BridgeSettingSetUint("Disassembler", "PermanentHighlightingMode", settings.disasmPermanentHighlightingMode);
+    BridgeSettingSetUint("Disassembler", "NoCurrentModuleText", settings.disasmNoCurrentModuleText);
+    BridgeSettingSetUint("Disassembler", "0xPrefixValues", settings.disasm0xPrefixValues);
+    BridgeSettingSetUint("Disassembler", "NoSourceLineAutoComments", settings.disasmNoSourceLineAutoComments);
 
     //Gui tab
     BridgeSettingSetUint("Gui", "FpuRegistersLittleEndian", settings.guiFpuRegistersLittleEndian);
@@ -341,6 +363,8 @@ void SettingsDialog::SaveSettings()
     BridgeSettingSetUint("Gui", "SidebarWatchLabels", settings.guiSidebarWatchLabels);
     BridgeSettingSetUint("Gui", "NoForegroundWindow", settings.guiNoForegroundWindow);
     BridgeSettingSetUint("Gui", "LoadSaveTabOrder", settings.guiLoadSaveTabOrder);
+    BridgeSettingSetUint("Gui", "ShowGraphRva", settings.guiShowGraphRva);
+    BridgeSettingSetUint("Gui", "ShowExitConfirmation", settings.guiShowExitConfirmation);
 
     //Misc tab
     if(DbgFunctions()->GetJit)
@@ -367,6 +391,9 @@ void SettingsDialog::SaveSettings()
         BridgeSettingSet("Symbols", "CachePath", ui->editSymbolCache->text().toUtf8().constData());
     BridgeSettingSet("Misc", "HelpOnSymbolicNameUrl", ui->editHelpOnSymbolicNameUrl->text().toUtf8().constData());
     BridgeSettingSetUint("Misc", "Utf16LogRedirect", settings.miscUtf16LogRedirect);
+    BridgeSettingSetUint("Misc", "UseLocalHelpFile", settings.miscUseLocalHelpFile);
+    BridgeSettingSetUint("Misc", "QueryProcessCookie", settings.miscQueryProcessCookie);
+    BridgeSettingSetUint("Misc", "QueryWorkingSet", settings.miscQueryWorkingSet);
 
     BridgeSettingFlush();
     Config()->load();
@@ -499,12 +526,7 @@ void SettingsDialog::on_chkSetJIT_stateChanged(int arg1)
                  * Scenario 2: the JIT in Windows registry its NOT this debugger, if the database of the debugger
                  * was removed and the user in MISC tab wants check and uncheck the JIT checkbox: he can (this block its NOT executed then).
                 */
-                QMessageBox msg(QMessageBox::Warning, tr("ERROR NOT FOUND OLD JIT"), tr("NOT FOUND OLD JIT ENTRY STORED, USE SETJIT COMMAND"));
-                msg.setWindowIcon(DIcon("compile-warning.png"));
-                msg.setParent(this, Qt::Dialog);
-                msg.setWindowFlags(msg.windowFlags() & (~Qt::WindowContextHelpButtonHint));
-                msg.exec();
-
+                SimpleWarningBox(this, tr("ERROR NOT FOUND OLD JIT"), tr("NOT FOUND OLD JIT ENTRY STORED, USE SETJIT COMMAND"));
                 settings.miscSetJIT = true;
             }
             else
@@ -769,4 +791,47 @@ void SettingsDialog::on_chkPermanentHighlightingMode_toggled(bool checked)
 void SettingsDialog::on_chkNoWow64SingleStepWorkaround_toggled(bool checked)
 {
     settings.engineNoWow64SingleStepWorkaround = checked;
+}
+
+void SettingsDialog::on_chkNoCurrentModuleText_toggled(bool checked)
+{
+    bTokenizerConfigUpdated = true;
+    settings.disasmNoCurrentModuleText = checked;
+}
+
+void SettingsDialog::on_chk0xPrefixValues_toggled(bool checked)
+{
+    bTokenizerConfigUpdated = true;
+    settings.disasm0xPrefixValues = checked;
+}
+
+void SettingsDialog::on_chkNoSourceLinesAutoComments_toggled(bool checked)
+{
+    settings.disasmNoSourceLineAutoComments = checked;
+}
+
+void SettingsDialog::on_chkShowGraphRva_toggled(bool checked)
+{
+    bTokenizerConfigUpdated = true;
+    settings.guiShowGraphRva = checked;
+}
+
+void SettingsDialog::on_chkShowExitConfirmation_toggled(bool checked)
+{
+    settings.guiShowExitConfirmation = checked;
+}
+
+void SettingsDialog::on_chkUseLocalHelpFile_toggled(bool checked)
+{
+    settings.miscUseLocalHelpFile = checked;
+}
+
+void SettingsDialog::on_chkQueryProcessCookie_toggled(bool checked)
+{
+    settings.miscQueryProcessCookie = checked;
+}
+
+void SettingsDialog::on_chkQueryWorkingSet_toggled(bool checked)
+{
+    settings.miscQueryWorkingSet = checked;
 }

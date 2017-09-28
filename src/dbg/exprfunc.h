@@ -8,6 +8,9 @@ namespace Exprfunc
     duint srcdisp(duint addr);
 
     duint modparty(duint addr);
+    duint modsystem(duint addr);
+    duint moduser(duint addr);
+    duint modrva(duint addr);
 
     duint disasmsel();
     duint dumpsel();
@@ -54,4 +57,14 @@ namespace Exprfunc
 
     duint funcstart(duint addr);
     duint funcend(duint addr);
+
+    duint refcount();
+    duint refaddr(duint row);
+    duint refsearchcount();
+    duint refsearchaddr(duint row);
+
+    duint argget(duint index);
+    duint argset(duint index, duint value);
+
+    duint bpgoto(duint cip);
 }

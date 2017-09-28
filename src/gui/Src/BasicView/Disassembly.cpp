@@ -21,7 +21,6 @@ Disassembly::Disassembly(QWidget* parent) : AbstractTableView(parent), mDisassem
     mSelection = data;
 
     mCipRva = 0;
-    mIsRunning = false;
 
     mHighlightToken.text = "";
     mHighlightingMode = false;
@@ -100,8 +99,19 @@ void Disassembly::updateColors()
     mAddressBackgroundColor = ConfigColor("DisassemblyAddressBackgroundColor");
     mAddressColor = ConfigColor("DisassemblyAddressColor");
     mBytesColor = ConfigColor("DisassemblyBytesColor");
+    mBytesBackgroundColor = ConfigColor("DisassemblyBytesBackgroundColor");
     mModifiedBytesColor = ConfigColor("DisassemblyModifiedBytesColor");
+    mModifiedBytesBackgroundColor = ConfigColor("DisassemblyModifiedBytesBackgroundColor");
     mRestoredBytesColor = ConfigColor("DisassemblyRestoredBytesColor");
+    mRestoredBytesBackgroundColor = ConfigColor("DisassemblyRestoredBytesBackgroundColor");
+    mByte00Color = ConfigColor("DisassemblyByte00Color");
+    mByte00BackgroundColor = ConfigColor("DisassemblyByte00BackgroundColor");
+    mByte7FColor = ConfigColor("DisassemblyByte7FColor");
+    mByte7FBackgroundColor = ConfigColor("DisassemblyByte7FBackgroundColor");
+    mByteFFColor = ConfigColor("DisassemblyByteFFColor");
+    mByteFFBackgroundColor = ConfigColor("DisassemblyByteFFBackgroundColor");
+    mByteIsPrintColor = ConfigColor("DisassemblyByteIsPrintColor");
+    mByteIsPrintBackgroundColor = ConfigColor("DisassemblyByteIsPrintBackgroundColor");
     mAutoCommentColor = ConfigColor("DisassemblyAutoCommentColor");
     mAutoCommentBackgroundColor = ConfigColor("DisassemblyAutoCommentBackgroundColor");
     mMnemonicBriefColor = ConfigColor("DisassemblyMnemonicBriefColor");
@@ -161,8 +171,6 @@ QString Disassembly::paintContent(QPainter* painter, dsint rowBase, int rowOffse
 {
     Q_UNUSED(rowBase);
 
-    const DBGFUNCTIONS* dbgFuncs = DbgFunctions();
-    bool isTraced;
     if(mHighlightingMode)
     {
         QPen pen(mInstructionHighlightColor);
@@ -175,15 +183,30 @@ QString Disassembly::paintContent(QPainter* painter, dsint rowBase, int rowOffse
     dsint wRVA = mInstBuffer.at(rowOffset).rva;
     bool wIsSelected = isSelected(&mInstBuffer, rowOffset);
     dsint cur_addr = rvaToVa(mInstBuffer.at(rowOffset).rva);
-    isTraced = dbgFuncs->GetTraceRecordHitCount(cur_addr) != 0;
+    auto traceCount = DbgFunctions()->GetTraceRecordHitCount(cur_addr);
 
     // Highlight if selected
-    if(wIsSelected & isTraced)
+    if(wIsSelected && traceCount)
         painter->fillRect(QRect(x, y, w, h), QBrush(mTracedSelectedAddressBackgroundColor));
     else if(wIsSelected)
         painter->fillRect(QRect(x, y, w, h), QBrush(mSelectionColor));
-    else if(isTraced)
-        painter->fillRect(QRect(x, y, w, h), QBrush(mTracedAddressBackgroundColor));
+    else if(traceCount)
+    {
+        // Color depending on how often a sequence of code is executed
+        int exponent = 1;
+        while(traceCount >>= 1) //log2(traceCount)
+            exponent++;
+        int colorDiff = (exponent * exponent) / 2;
+
+        // If the user has a light trace background color, substract
+        if(mTracedAddressBackgroundColor.blue() > 160)
+            colorDiff *= -1;
+
+        painter->fillRect(QRect(x, y, w, h),
+                          QBrush(QColor(mTracedAddressBackgroundColor.red(),
+                                        mTracedAddressBackgroundColor.green(),
+                                        std::max(0, std::min(256, mTracedAddressBackgroundColor.blue() + colorDiff)))));
+    }
 
     switch(col)
     {
@@ -193,7 +216,7 @@ QString Disassembly::paintContent(QPainter* painter, dsint rowBase, int rowOffse
         QString addrText = getAddrText(cur_addr, label);
         BPXTYPE bpxtype = DbgGetBpxTypeAt(cur_addr);
         bool isbookmark = DbgGetBookmarkAt(cur_addr);
-        if(mInstBuffer.at(rowOffset).rva == mCipRva && !mIsRunning && DbgMemFindBaseAddr(DbgValFromString("cip"), nullptr)) //cip + not running + valid cip
+        if(mInstBuffer.at(rowOffset).rva == mCipRva && !Bridge::getBridge()->mIsRunning && DbgMemFindBaseAddr(DbgValFromString("cip"), nullptr)) //cip + not running + valid cip
         {
             painter->fillRect(QRect(x, y, w, h), QBrush(mCipBackgroundColor));
             if(!isbookmark) //no bookmark
@@ -365,7 +388,7 @@ QString Disassembly::paintContent(QPainter* painter, dsint rowBase, int rowOffse
                 }
             }
         }
-        painter->drawText(QRect(x + 4, y , w - 4 , h), Qt::AlignVCenter | Qt::AlignLeft, addrText);
+        painter->drawText(QRect(x + 4, y, w - 4, h), Qt::AlignVCenter | Qt::AlignLeft, addrText);
     }
     break;
 
@@ -419,7 +442,7 @@ QString Disassembly::paintContent(QPainter* painter, dsint rowBase, int rowOffse
         }
 
         int charwidth = getCharWidth();
-        painter->drawText(QRect(x + funcsize, y , charwidth , h), Qt::AlignVCenter | Qt::AlignLeft, indicator);
+        painter->drawText(QRect(x + funcsize, y, charwidth, h), Qt::AlignVCenter | Qt::AlignLeft, indicator);
         funcsize += charwidth;
 
         //draw jump arrows
@@ -429,29 +452,89 @@ QString Disassembly::paintContent(QPainter* painter, dsint rowBase, int rowOffse
         //draw bytes
         RichTextPainter::List richBytes;
         RichTextPainter::CustomRichText_t space;
-        space.highlight = false;
+        space.highlightColor = ConfigColor("DisassemblyRelocationUnderlineColor");
+        space.highlightWidth = 1;
+        space.highlightConnectPrev = true;
         space.flags = RichTextPainter::FlagNone;
         space.text = " ";
         RichTextPainter::CustomRichText_t curByte;
-        curByte.highlight = false;
-        curByte.flags = RichTextPainter::FlagColor;
+        curByte.highlightColor = ConfigColor("DisassemblyRelocationUnderlineColor");
+        curByte.highlightWidth = 1;
+        curByte.flags = RichTextPainter::FlagAll;
         auto dump = mInstBuffer.at(rowOffset).dump;
         for(int i = 0; i < dump.size(); i++)
         {
+            DBGRELOCATIONINFO relocInfo;
+            if(DbgFunctions()->ModRelocationAtAddr(cur_addr + i, &relocInfo))
+            {
+                bool prevInSameReloc = relocInfo.rva < cur_addr + i - DbgFunctions()->ModBaseFromAddr(cur_addr + i);
+                space.highlight = prevInSameReloc;
+                curByte.highlight = true;
+                curByte.highlightConnectPrev = prevInSameReloc;
+            }
+            else
+            {
+                space.highlight = false;
+                curByte.highlight = false;
+            }
+
             if(i)
                 richBytes.push_back(space);
+
             auto byte = (unsigned char)dump.at(i);
             curByte.text = ToByteString(byte);
+
             DBGPATCHINFO patchInfo;
             if(DbgFunctions()->PatchGetEx(cur_addr + i, &patchInfo))
-                curByte.textColor = byte == patchInfo.newbyte ? mModifiedBytesColor : mRestoredBytesColor;
+            {
+                if(byte == patchInfo.newbyte)
+                {
+                    curByte.textColor = mModifiedBytesColor;
+                    curByte.textBackground = mModifiedBytesBackgroundColor;
+                }
+                else
+                {
+                    curByte.textColor = mRestoredBytesColor;
+                    curByte.textBackground = mRestoredBytesBackgroundColor;
+                }
+            }
             else
-                curByte.textColor = mBytesColor;
+            {
+                switch(byte)
+                {
+                case 0x00:
+                    curByte.textColor = mByte00Color;
+                    curByte.textBackground = mByte00BackgroundColor;
+                    break;
+                case 0x7F:
+                    curByte.textColor = mByte7FColor;
+                    curByte.textBackground = mByte7FBackgroundColor;
+                    break;
+                case 0xFF:
+                    curByte.textColor = mByteFFColor;
+                    curByte.textBackground = mByteFFBackgroundColor;
+                    break;
+                default:
+                    if(isprint(byte) || isspace(byte))
+                    {
+                        curByte.textColor = mByteIsPrintColor;
+                        curByte.textBackground = mByteIsPrintBackgroundColor;
+                    }
+                    else
+                    {
+                        curByte.textColor = mBytesColor;
+                        curByte.textBackground = mBytesBackgroundColor;
+                    }
+                    break;
+                }
+            }
+
             richBytes.push_back(curByte);
         }
         if(mCodeFoldingManager && mCodeFoldingManager->isFolded(cur_addr))
         {
             curByte.textColor = mBytesColor;
+            curByte.textBackground = mBytesBackgroundColor;
             curByte.text = "...";
             richBytes.push_back(curByte);
         }
@@ -556,7 +639,7 @@ QString Disassembly::paintContent(QPainter* painter, dsint rowBase, int rowOffse
                 width = w;
             if(width)
                 painter->fillRect(QRect(x + argsize, y, width, h), QBrush(backgroundColor)); //fill comment color
-            painter->drawText(QRect(x + argsize, y , width , h), Qt::AlignVCenter | Qt::AlignLeft, comment);
+            painter->drawText(QRect(x + argsize, y, width, h), Qt::AlignVCenter | Qt::AlignLeft, comment);
             argsize += width + 3;
         }
         else if(DbgGetLabelAt(cur_addr, SEG_DEFAULT, label)) // label but no comment
@@ -594,14 +677,14 @@ QString Disassembly::paintContent(QPainter* painter, dsint rowBase, int rowOffse
                     width = w;
                 if(width)
                     painter->fillRect(QRect(x + argsize, y, width, h), QBrush(mMnemonicBriefBackgroundColor)); //mnemonic brief background color
-                painter->drawText(QRect(x + argsize, y , width, h), Qt::AlignVCenter | Qt::AlignLeft, mnemBrief);
+                painter->drawText(QRect(x + argsize, y, width, h), Qt::AlignVCenter | Qt::AlignLeft, mnemBrief);
             }
             break;
         }
     }
     break;
     }
-    return "";
+    return QString();
 }
 
 /************************************************************************************
@@ -1065,7 +1148,7 @@ int Disassembly::paintJumpsGraphic(QPainter* painter, int x, int y, dsint addr, 
     {
         QPoint wPoints[] =
         {
-            QPoint(x , y + halfRow + 1),
+            QPoint(x, y + halfRow + 1),
             QPoint(x + 2, y + halfRow - 1),
             QPoint(x + 4, y + halfRow + 1),
         };
@@ -1076,7 +1159,7 @@ int Disassembly::paintJumpsGraphic(QPainter* painter, int x, int y, dsint addr, 
     {
         QPoint wPoints[] =
         {
-            QPoint(x , y + halfRow - 1),
+            QPoint(x, y + halfRow - 1),
             QPoint(x + 2, y + halfRow + 1),
             QPoint(x + 4, y + halfRow - 1),
         };
@@ -1298,7 +1381,7 @@ dsint Disassembly::getPreviousInstructionRVA(dsint rva, duint count)
 
     mMemPage->read(wBuffer.data(), wBottomByteRealRVA, wBuffer.size());
 
-    dsint addr = mDisasm->DisassembleBack((byte_t*)wBuffer.data(), rvaToVa(wBottomByteRealRVA), wBuffer.size(), wVirtualRVA , count);
+    dsint addr = mDisasm->DisassembleBack((byte_t*)wBuffer.data(), rvaToVa(wBottomByteRealRVA), wBuffer.size(), wVirtualRVA, count);
 
     addr += rva - wVirtualRVA;
 
@@ -1820,12 +1903,6 @@ void Disassembly::debugStateChangedSlot(DBGSTATE state)
     {
     case stopped:
         disassembleClear();
-        break;
-    case paused:
-        mIsRunning = false;
-        break;
-    case running:
-        mIsRunning = true;
         break;
     default:
         break;

@@ -186,8 +186,7 @@ Instruction_t QBeaEngine::DisassembleAt(byte_t* data, duint size, duint origBase
     if(datainstr)
     {
         ENCODETYPE type = mEncodeMap->getDataType(origBase + origInstRVA);
-
-        if(type != enc_unknown && type != enc_code && type != enc_middle)
+        if(!mEncodeMap->isCode(type))
             return DecodeDataAt(data, size, origBase, origInstRVA, type);
     }
     //tokenize
@@ -232,6 +231,38 @@ Instruction_t QBeaEngine::DisassembleAt(byte_t* data, duint size, duint origBase
     wInst.branchType = branchType;
     wInst.tokens = cap;
 
+    if(success)
+    {
+        cp.RegInfo(reginfo);
+        cp.FlagInfo(flaginfo);
+
+        auto flaginfo2reginfo = [](uint8_t info)
+        {
+            auto result = 0;
+#define checkFlag(test, reg) result |= (info & test) == test ? reg : 0
+            checkFlag(Capstone::Modify, Capstone::Write);
+            checkFlag(Capstone::Prior, Capstone::None);
+            checkFlag(Capstone::Reset, Capstone::Write);
+            checkFlag(Capstone::Set, Capstone::Write);
+            checkFlag(Capstone::Test, Capstone::Read);
+            checkFlag(Capstone::Undefined, Capstone::None);
+#undef checkFlag
+            return result;
+        };
+
+        for(uint8_t i = Capstone::FLAG_INVALID; i < Capstone::FLAG_ENDING; i++)
+            if(flaginfo[i])
+            {
+                reginfo[X86_REG_EFLAGS] = Capstone::None;
+                wInst.regsReferenced.push_back({cp.FlagName(Capstone::Flag(i)), flaginfo2reginfo(flaginfo[i])});
+            }
+
+        reginfo[ArchValue(X86_REG_EIP, X86_REG_RIP)] = Capstone::None;
+        for(uint8_t i = X86_REG_INVALID; i < X86_REG_ENDING; i++)
+            if(reginfo[i])
+                wInst.regsReferenced.push_back({cp.RegName(x86_reg(i)), reginfo[i]});
+    }
+
     return wInst;
 }
 
@@ -243,7 +274,6 @@ Instruction_t QBeaEngine::DecodeDataAt(byte_t* data, duint size, duint origBase,
     auto & infoIter = dataInstMap.find(type);
     if(infoIter == dataInstMap.end())
         infoIter = dataInstMap.find(enc_byte);
-
 
     int len = mEncodeMap->getDataSize(origBase + origInstRVA, 1);
 
@@ -285,7 +315,6 @@ void QBeaEngine::UpdateDataInstructionMap()
     dataInstMap.insert(enc_real10, {"real10", "real10", "long double"});
     dataInstMap.insert(enc_ascii, {"ascii", "ascii", "string"});
     dataInstMap.insert(enc_unicode, {"unicode", "unicode", "wstring"});
-
 }
 
 void QBeaEngine::setCodeFoldingManager(CodeFoldingHelper* CodeFoldingManager)

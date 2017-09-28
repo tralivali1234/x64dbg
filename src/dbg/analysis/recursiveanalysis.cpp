@@ -116,16 +116,46 @@ void RecursiveAnalysis::analyzeFunction(duint entryPoint)
             if(xref.addr)
                 mXrefs.push_back(xref);
 
-            if(mCp.InGroup(CS_GRP_JUMP) || mCp.IsLoop()) //jump
+            if(!mCp.IsNop() && (mCp.InGroup(CS_GRP_JUMP) || mCp.IsLoop())) //non-nop jump
             {
                 //set the branch destinations
                 node.brtrue = mCp.BranchDestination();
-                if(mCp.GetId() != X86_INS_JMP && mCp.GetId() != X86_INS_LJMP)  //unconditional jumps dont have a brfalse
+                if(mCp.GetId() != X86_INS_JMP && mCp.GetId() != X86_INS_LJMP) //unconditional jumps dont have a brfalse
                     node.brfalse = node.end + mCp.Size();
 
                 //consider register/memory branches as terminal nodes
                 if(mCp[0].type != X86_OP_IMM)
-                    node.terminal = true;
+                {
+                    //jmp ptr [index * sizeof(duint) + switchTable]
+                    if(mCp[0].type == X86_OP_MEM && mCp[0].mem.base == X86_OP_INVALID && mCp[0].mem.index != X86_OP_INVALID
+                            && mCp[0].mem.scale == sizeof(duint) && MemIsValidReadPtr(duint(mCp[0].mem.disp)))
+                    {
+                        Memory<duint*> switchTable(512 * sizeof(duint));
+                        duint actualSize, index;
+                        MemRead(duint(mCp[0].mem.disp), switchTable(), 512 * sizeof(duint), &actualSize);
+                        actualSize /= sizeof(duint);
+                        for(index = 0; index < actualSize; index++)
+                            if(MemIsCodePage(switchTable()[index], false) == false)
+                                break;
+                        actualSize = index;
+                        if(actualSize >= 2 && actualSize < 512)
+                        {
+                            node.brtrue = 0;
+                            node.brfalse = 0;
+                            for(index = 0; index < actualSize; index++)
+                            {
+                                node.exits.push_back(switchTable()[index]);
+                                queue.emplace(switchTable()[index]);
+                                xref.addr = switchTable()[index];
+                                mXrefs.push_back(xref);
+                            }
+                        }
+                        else
+                            node.terminal = true;
+                    }
+                    else
+                        node.terminal = true;
+                }
 
                 //add node to the function graph
                 graph.AddNode(node);
@@ -138,11 +168,11 @@ void RecursiveAnalysis::analyzeFunction(duint entryPoint)
 
                 break;
             }
-            if(mCp.InGroup(CS_GRP_CALL))  //call
+            if(mCp.InGroup(CS_GRP_CALL)) //call
             {
                 //TODO: add this to a queue to be analyzed later
             }
-            if(mCp.InGroup(CS_GRP_RET))  //return
+            if(mCp.InGroup(CS_GRP_RET)) //return
             {
                 node.terminal = true;
                 graph.AddNode(node);
@@ -191,9 +221,25 @@ void RecursiveAnalysis::analyzeFunction(duint entryPoint)
             continue;
         node.instrs.reserve(node.icount);
         auto addr = node.start;
-        while(addr <= node.end)
+        while(addr <= node.end) //disassemble all instructions
         {
             auto size = mCp.Disassemble(addr, translateAddr(addr)) ? mCp.Size() : 1;
+            if(mCp.InGroup(CS_GRP_CALL) && mCp.OpCount()) //call reg / call [reg+X]
+            {
+                auto & op = mCp[0];
+                switch(op.type)
+                {
+                case X86_OP_REG:
+                    node.indirectcall = true;
+                    break;
+                case X86_OP_MEM:
+                    node.indirectcall |= op.mem.base != X86_REG_RIP &&
+                                         (op.mem.base != X86_REG_INVALID || op.mem.index != X86_REG_INVALID);
+                    break;
+                default:
+                    break;
+                }
+            }
             BridgeCFInstruction instr;
             instr.addr = addr;
             for(int i = 0; i < size; i++)

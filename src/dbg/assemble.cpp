@@ -185,29 +185,13 @@ static bool isInstructionPointingToExMemory(duint addr, const unsigned char* des
     if(MemIsCodePage(basicinfo.addr, false))
         return true;
 
-#ifndef _WIN64
-    DWORD lpFlagsDep;
-    BOOL bPermanentDep;
-
-    // DEP is disabled if lpFlagsDep == 0
-    typedef BOOL(WINAPI * GETPROCESSDEPPOLICY)(
-        _In_  HANDLE  hProcess,
-        _Out_ LPDWORD lpFlags,
-        _Out_ PBOOL   lpPermanent
-    );
-    static auto GPDP = GETPROCESSDEPPOLICY(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "GetProcessDEPPolicy"));
-
-    // If DEP is disabled it doesn't matter where the memory points because it's executable anyway.
-    if(GPDP && GPDP(fdProcessInfo->hProcess, &lpFlagsDep, &bPermanentDep) && lpFlagsDep == 0)
-        return true;
-#endif //_WIN64
-
-    return false;
+    // Check if DEP is disabled
+    return !dbgisdepenabled();
 }
 
 bool assembleat(duint addr, const char* instruction, int* size, char* error, bool fillnop)
 {
-    int destSize;
+    int destSize = 0;
     Memory<unsigned char*> dest(16 * sizeof(unsigned char), "AssembleBuffer");
     unsigned char* newbuffer = nullptr;
     if(!assemble(addr, dest(), 16, &destSize, instruction, error))
@@ -216,11 +200,12 @@ bool assembleat(duint addr, const char* instruction, int* size, char* error, boo
         {
             dest.realloc(destSize);
             if(!assemble(addr, dest(), destSize, &destSize, instruction, error))
-            {
                 return false;
-            }
         }
+        else
+            return false;
     }
+
     //calculate the number of NOPs to insert
     int origLen = disasmgetsize(addr);
     while(origLen < destSize)

@@ -26,6 +26,9 @@
 #include "tcpconnections.h"
 #include "watch.h"
 #include "animate.h"
+#include "thread.h"
+#include "comment.h"
+#include "exception.h"
 
 static DBGFUNCTIONS _dbgfunctions;
 
@@ -166,7 +169,8 @@ bool _getprocesslist(DBGPROCESSINFO** entries, int* count)
 {
     std::vector<PROCESSENTRY32> infoList;
     std::vector<std::string> commandList;
-    if(!dbglistprocesses(&infoList, &commandList))
+    std::vector<std::string> winTextList;
+    if(!dbglistprocesses(&infoList, &commandList, &winTextList))
         return false;
     *count = (int)infoList.size();
     if(!*count)
@@ -176,6 +180,7 @@ bool _getprocesslist(DBGPROCESSINFO** entries, int* count)
     {
         (*entries)[*count - i - 1].dwProcessId = infoList.at(i).th32ProcessID;
         strncpy_s((*entries)[*count - i - 1].szExeFile, infoList.at(i).szExeFile, _TRUNCATE);
+        strncpy_s((*entries)[*count - i - 1].szExeMainWindowTitle, winTextList.at(i).c_str(), _TRUNCATE);
         strncpy_s((*entries)[*count - i - 1].szExeArgs, commandList.at(i).c_str(), _TRUNCATE);
     }
     return true;
@@ -257,7 +262,7 @@ static bool _stringformatinline(const char* format, size_t resultSize, char* res
 {
     if(!format || !result)
         return false;
-    strcpy_s(result, resultSize, stringformatinline(format).c_str());
+    strncpy_s(result, resultSize, stringformatinline(format).c_str(), _TRUNCATE);
     return true;
 }
 
@@ -265,7 +270,7 @@ static void _getmnemonicbrief(const char* mnem, size_t resultSize, char* result)
 {
     if(!result)
         return;
-    strcpy_s(result, resultSize, MnemonicHelp::getBriefDescription(mnem).c_str());
+    strncpy_s(result, resultSize, MnemonicHelp::getBriefDescription(mnem).c_str(), _TRUNCATE);
 }
 
 static bool _enumhandles(ListOf(HANDLEINFO) handles)
@@ -293,6 +298,75 @@ static bool _enumtcpconnections(ListOf(TCPCONNECTIONINFO) connections)
     if(!TcpEnumConnections(fdProcessInfo->dwProcessId, connectionsV))
         return false;
     return BridgeList<TCPCONNECTIONINFO>::CopyData(connections, connectionsV);
+}
+
+static bool _enumwindows(ListOf(WINDOW_INFO) windows)
+{
+    std::vector<WINDOW_INFO> windowInfoV;
+    if(!HandlesEnumWindows(windowInfoV))
+        return false;
+    return BridgeList<WINDOW_INFO>::CopyData(windows, windowInfoV);
+}
+
+static bool _enumheaps(ListOf(HEAPINFO) heaps)
+{
+    std::vector<HEAPINFO> heapInfoV;
+    if(!HandlesEnumHeaps(heapInfoV))
+        return false;
+    return BridgeList<HEAPINFO>::CopyData(heaps, heapInfoV);
+}
+
+static void _getcallstackex(DBGCALLSTACK* callstack, bool cache)
+{
+    auto csp = GetContextDataEx(hActiveThread, UE_CSP);
+    if(!cache)
+        stackupdatecallstack(csp);
+    stackgetcallstack(csp, (CALLSTACK*)callstack);
+}
+
+static void _enumconstants(ListOf(CONSTANTINFO) constants)
+{
+    auto constantsV = ConstantList();
+    BridgeList<CONSTANTINFO>::CopyData(constants, constantsV);
+}
+
+static void _enumerrorcodes(ListOf(CONSTANTINFO) errorcodes)
+{
+    auto errorcodesV = ErrorCodeList();
+    BridgeList<CONSTANTINFO>::CopyData(errorcodes, errorcodesV);
+}
+
+static void _enumexceptions(ListOf(CONSTANTINFO) exceptions)
+{
+    auto exceptionsV = ExceptionList();
+    BridgeList<CONSTANTINFO>::CopyData(exceptions, exceptionsV);
+}
+
+static duint _membpsize(duint addr)
+{
+    SHARED_ACQUIRE(LockBreakpoints);
+    auto info = BpInfoFromAddr(BPMEMORY, addr);
+    return info ? info->memsize : 0;
+}
+
+static bool _modrelocationsfromaddr(duint addr, ListOf(DBGRELOCATIONINFO) relocations)
+{
+    std::vector<MODRELOCATIONINFO> infos;
+    if(!ModRelocationsFromAddr(addr, infos))
+        return false;
+
+    BridgeList<MODRELOCATIONINFO>::CopyData(relocations, infos);
+    return true;
+}
+
+static bool _modrelocationsinrange(duint addr, duint size, ListOf(DBGRELOCATIONINFO) relocations)
+{
+    std::vector<MODRELOCATIONINFO> infos;
+    if(!ModRelocationsInRange(addr, size, infos))
+        return false;
+
+    BridgeList<MODRELOCATIONINFO>::CopyData(relocations, infos);
+    return true;
 }
 
 void dbgfunctionsinit()
@@ -352,4 +426,17 @@ void dbgfunctionsinit()
     _dbgfunctions.AnimateCommand = _dbg_animatecommand;
     _dbgfunctions.DbgSetDebuggeeInitScript = dbgsetdebuggeeinitscript;
     _dbgfunctions.DbgGetDebuggeeInitScript = dbggetdebuggeeinitscript;
+    _dbgfunctions.EnumWindows = _enumwindows;
+    _dbgfunctions.EnumHeaps = _enumheaps;
+    _dbgfunctions.ThreadGetName = ThreadGetName;
+    _dbgfunctions.IsDepEnabled = dbgisdepenabled;
+    _dbgfunctions.GetCallStackEx = _getcallstackex;
+    _dbgfunctions.GetUserComment = CommentGet;
+    _dbgfunctions.EnumConstants = _enumconstants;
+    _dbgfunctions.EnumErrorCodes = _enumerrorcodes;
+    _dbgfunctions.EnumExceptions = _enumexceptions;
+    _dbgfunctions.MemBpSize = _membpsize;
+    _dbgfunctions.ModRelocationsFromAddr = _modrelocationsfromaddr;
+    _dbgfunctions.ModRelocationAtAddr = (MODRELOCATIONATADDR)ModRelocationAtAddr;
+    _dbgfunctions.ModRelocationsInRange = _modrelocationsinrange;
 }

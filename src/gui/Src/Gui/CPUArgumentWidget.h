@@ -37,7 +37,7 @@ public:
     {
         if(argText.length())
             return QString("%1: %2").arg(argName).arg(argText);
-        return "";
+        return QString();
     }
 
 public slots:
@@ -150,6 +150,8 @@ private:
 
     void loadConfig();
     void setupTable();
+
+    void updateStackOffset(bool iscall);
 };
 
 #endif // CPUARGUMENTWIDGET_H

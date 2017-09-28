@@ -23,9 +23,7 @@ class PatchDialog;
 class CalculatorDialog;
 class DebugStatusLabel;
 class LogStatusLabel;
-class UpdateChecker;
 class SourceViewerManager;
-class SnowmanView;
 class HandlesView;
 class MainWindowCloseThread;
 class TimeWastedCounter;
@@ -33,6 +31,8 @@ class NotesManager;
 class SettingsDialog;
 class DisassemblerGraphView;
 class SimpleTraceDialog;
+class MRUList;
+class UpdateChecker;
 
 namespace Ui
 {
@@ -70,7 +70,8 @@ public slots:
     void animateIntoSlot();
     void animateOverSlot();
     void animateCommandSlot();
-    void openFile();
+    void openFileSlot();
+    void openRecentFileSlot(QString filename);
     void restartDebugging();
     void displayBreakpointWidget();
     void updateWindowTitleSlot(QString filename);
@@ -101,12 +102,13 @@ public slots:
     void addMenu(int hMenu, QString title);
     void addMenuEntry(int hMenu, QString title);
     void addSeparator(int hMenu);
-    void clearMenu(int hMenu);
+    void clearMenu(int hMenu, bool erase);
     void menuEntrySlot();
-    void removeMenuEntry(int hEntry);
+    void removeMenuEntry(int hEntryMenu);
     void setIconMenuEntry(int hEntry, QIcon icon);
     void setIconMenu(int hMenu, QIcon icon);
     void setCheckedMenuEntry(int hEntry, bool checked);
+    void setHotkeyMenuEntry(int hEntry, QString hotkey, QString id);
     void setVisibleMenuEntry(int hEntry, bool visible);
     void setVisibleMenu(int hMenu, bool visible);
     void setNameMenuEntry(int hEntry, QString name);
@@ -119,7 +121,6 @@ public slots:
     void displayLabels();
     void displayBookmarks();
     void displayFunctions();
-    void checkUpdates();
     void crashDump();
     void displayCallstack();
     void displaySEHChain();
@@ -133,7 +134,6 @@ public slots:
     void displayAttach();
     void changeCommandLine();
     void displayManual();
-    void decompileAt(dsint start, dsint end);
     void canClose();
     void addQWidgetTab(QWidget* qWidget, QString nativeName);
     void addQWidgetTab(QWidget* qWidget);
@@ -172,32 +172,25 @@ private:
     ThreadView* mThreadView;
     PatchDialog* mPatchDialog;
     CalculatorDialog* mCalculatorDialog;
-    SnowmanView* mSnowmanView;
+    QWidget* mSnowmanView;
     HandlesView* mHandlesView;
     NotesManager* mNotesManager;
     DisassemblerGraphView* mGraphView;
     SimpleTraceDialog* mSimpleTraceDialog;
-
+    UpdateChecker* mUpdateChecker;
     DebugStatusLabel* mStatusLabel;
     LogStatusLabel* mLastLogLabel;
 
-    UpdateChecker* mUpdateChecker;
     TimeWastedCounter* mTimeWastedCounter;
 
     QString mWindowMainTitle;
 
-    QStringList mMRUList;
-    int mMaxMRU;
+    MRUList* mMRUList;
     unsigned int lastException;
 
     QAction* actionManageFavourites;
 
-    void loadMRUList(int maxItems);
-    void saveMRUList();
-    void addMRUEntry(QString entry);
-    void removeMRUEntry(QString entry);
     void updateMRUMenu();
-    QString getMRUEntry(int index);
     void setupLanguagesMenu();
     void onMenuCustomized();
     void setupMenuCustomization();
@@ -218,32 +211,35 @@ private:
         QAction* mAction;
         int hEntry;
         int hParentMenu;
+        QString hotkey;
+        QString hotkeyId;
+        bool hotkeyGlobal;
     };
 
     struct MenuInfo
     {
     public:
-        MenuInfo(QWidget* parent, QMenu* mMenu, int hMenu, int hParentMenu)
+        MenuInfo(QWidget* parent, QMenu* mMenu, int hMenu, int hParentMenu, bool globalMenu)
+            : parent(parent), mMenu(mMenu), hMenu(hMenu), hParentMenu(hParentMenu), globalMenu(globalMenu)
         {
-            this->parent = parent;
-            this->mMenu = mMenu;
-            this->hMenu = hMenu;
-            this->hParentMenu = hParentMenu;
         }
 
         QWidget* parent;
         QMenu* mMenu;
         int hMenu;
         int hParentMenu;
+        bool globalMenu;
     };
 
+    int hEntryMenuPool;
     QList<MenuEntryInfo> mEntryList;
-    int hEntryNext;
     QList<MenuInfo> mMenuList;
-    int hMenuNext;
 
     void initMenuApi();
     const MenuInfo* findMenu(int hMenu);
+    QString nestedMenuDescription(const MenuInfo* menu);
+    QString nestedMenuEntryDescription(const MenuEntryInfo & entry);
+    void clearMenuHelper(int hMenu);
 
     bool bCanClose;
     MainWindowCloseThread* mCloseThread;
@@ -277,6 +273,8 @@ private slots:
     void on_actionImportdatabase_triggered();
     void on_actionExportdatabase_triggered();
     void on_actionRestartAdmin_triggered();
+    void on_actionPlugins_triggered();
+    void on_actionCheckUpdates_triggered();
 };
 
 #endif // MAINWINDOW_H

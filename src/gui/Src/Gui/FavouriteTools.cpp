@@ -67,6 +67,8 @@ FavouriteTools::FavouriteTools(QWidget* parent) :
     connect(ui->tabWidget, SIGNAL(currentChanged(int)), this, SLOT(tabChanged(int)));
     emit ui->listTools->itemSelectionChanged();
     updateToolsBtnEnabled();
+
+    Config()->setupWindowPos(this);
 }
 
 void FavouriteTools::setupTools(QString name, QTableWidget* list)
@@ -122,7 +124,7 @@ void FavouriteTools::on_btnAddFavouriteTool_clicked()
     memset(buffer, 0, sizeof(buffer));
     BridgeSettingGet("Favourite", "LastToolPath", buffer);
     BrowseDialog browse(this, tr("Browse tool"), tr("Enter the path of the tool."), tr("Executable Files (*.exe);;All Files (*.*)"), QString(buffer), false);
-    if(browse.exec() != QDialog::Accepted && browse.path.length())
+    if(browse.exec() != QDialog::Accepted || browse.path.length() == 0)
         return;
     filename = browse.path;
     BridgeSettingSet("Favourite", "LastToolPath", filename.toUtf8().constData());
@@ -484,6 +486,7 @@ void FavouriteTools::tabChanged(int i)
 
 FavouriteTools::~FavouriteTools()
 {
+    Config()->saveWindowPos(this);
     delete ui;
 }
 

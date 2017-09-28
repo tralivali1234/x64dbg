@@ -33,14 +33,14 @@ public:
     void setResult(dsint result = 0);
 
     //helper functions
-    void emitLoadSourceFile(const QString path, int line = 0, int selection = 0);
     void emitMenuAddToList(QWidget* parent, QMenu* menu, int hMenu, int hParentMenu = -1);
     void setDbgStopped();
 
     //Public variables
-    void* winId;
-    QWidget* scriptView;
-    ReferenceManager* referenceManager;
+    void* winId = nullptr;
+    ReferenceManager* referenceManager = nullptr;
+    QWidget* snowmanView = nullptr;
+    bool mIsRunning = false;
 
 signals:
     void disassembleAt(dsint va, dsint eip);
@@ -69,6 +69,7 @@ signals:
     void referenceAddColumnAt(int width, QString title);
     void referenceSetRowCount(dsint count);
     void referenceSetCellContent(int r, int c, QString s);
+    void referenceAddCommand(QString title, QString command);
     void referenceReloadData();
     void referenceSetSingleSelection(int index, bool scroll);
     void referenceSetProgress(int progress);
@@ -85,8 +86,8 @@ signals:
     void menuAddMenu(int hMenu, QString title);
     void menuAddMenuEntry(int hMenu, QString title);
     void menuAddSeparator(int hMenu);
-    void menuClearMenu(int hMenu);
-    void menuRemoveMenuEntry(int hEntry);
+    void menuClearMenu(int hMenu, bool erase);
+    void menuRemoveMenuEntry(int hEntryMenu);
     void selectionDisasmGet(SELECTIONDATA* selection);
     void selectionDisasmSet(const SELECTIONDATA* selection);
     void selectionDumpGet(SELECTIONDATA* selection);
@@ -116,6 +117,7 @@ signals:
     void setVisibleMenu(int hMenu, bool visible);
     void setNameMenuEntry(int hEntry, QString name);
     void setNameMenu(int hMenu, QString name);
+    void setHotkeyMenuEntry(int hEntry, QString hotkey, QString id);
     void showCpu();
     void addQWidgetTab(QWidget* qWidget);
     void showQWidgetTab(QWidget* qWidget);
@@ -150,12 +152,18 @@ signals:
     void typeClear();
     void typeUpdateWidget();
     void closeApplication();
+    void flushLog();
+    void getDumpAttention();
 
 private:
-    QMutex* mBridgeMutex;
-    dsint bridgeResult;
+    CRITICAL_SECTION csBridge;
     HANDLE hResultEvent;
-    volatile bool dbgStopped;
+    DWORD dwMainThreadId = 0;
+    dsint bridgeResult = 0;
+    volatile bool dbgStopped = false;
 };
+
+void DbgCmdExec(const QString & cmd);
+bool DbgCmdExecDirect(const QString & cmd);
 
 #endif // BRIDGE_H

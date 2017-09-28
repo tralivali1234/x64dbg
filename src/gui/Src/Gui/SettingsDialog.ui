@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>381</width>
-    <height>508</height>
+    <height>514</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -518,9 +518,30 @@
         </widget>
        </item>
        <item>
+        <widget class="QCheckBox" name="chkNoCurrentModuleText">
+         <property name="text">
+          <string>Hide module name for local memory addresses</string>
+         </property>
+        </widget>
+       </item>
+       <item>
         <widget class="QCheckBox" name="chkPermanentHighlightingMode">
          <property name="text">
           <string>Permanent highlighting mode</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chk0xPrefixValues">
+         <property name="text">
+          <string>0x prefix for values</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkNoSourceLinesAutoComments">
+         <property name="text">
+          <string>Don't show source lines in comments</string>
          </property>
         </widget>
        </item>
@@ -596,6 +617,20 @@
         <widget class="QCheckBox" name="chkNoForegroundWindow">
          <property name="text">
           <string>Do not call SetForegroundWindow</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkShowGraphRva">
+         <property name="text">
+          <string>Show RVA addresses in graph view</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkShowExitConfirmation">
+         <property name="text">
+          <string>Show exit confirmation dialog</string>
          </property>
         </widget>
        </item>
@@ -710,6 +745,27 @@
         <widget class="QCheckBox" name="chkUtf16LogRedirect">
          <property name="text">
           <string>UTF-16 Log Redirect*</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkUseLocalHelpFile">
+         <property name="text">
+          <string>Use local help file (x64dbg.chm)</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkQueryProcessCookie">
+         <property name="text">
+          <string>Query process cookie*</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QCheckBox" name="chkQueryWorkingSet">
+         <property name="text">
+          <string>Query working set before reading memory</string>
          </property>
         </widget>
        </item>

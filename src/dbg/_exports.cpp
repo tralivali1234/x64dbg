@@ -33,8 +33,12 @@
 #include "watch.h"
 #include "animate.h"
 #include "TraceRecord.h"
+#include "recursiveanalysis.h"
+#include "dbghelp_safe.h"
 
 static bool bOnlyCipAutoComments = false;
+static bool bNoSourceLineAutoComments = false;
+static TITAN_ENGINE_CONTEXT_t titcontext;
 
 extern "C" DLL_EXPORT duint _dbg_memfindbaseaddr(duint addr, duint* size)
 {
@@ -128,6 +132,51 @@ static bool shouldFilterSymbol(const char* name)
     return filterInfo.retval;
 }
 
+// https://github.com/llvm-mirror/llvm/blob/2ae7de27f7d9276e7bada445ea7576bbc4c83ae6/lib/DebugInfo/Symbolize/Symbolize.cpp#L427
+// https://github.com/x64dbg/x64dbg/pull/1478
+// Undo these various manglings for Win32 extern "C" functions:
+// cdecl       - _foo
+// stdcall     - _foo@12
+// fastcall    - @foo@12
+// vectorcall  - foo@@12
+// These are all different linkage names for 'foo'.
+static char* demanglePE32ExternCFunc(char* SymbolName)
+{
+    // Only do this for Win32
+#ifdef _WIN64
+    return SymbolName;
+#endif //_WIN64
+
+    // Don't try to demangle C++ names
+    char Front = SymbolName[0];
+    if(Front == '?')
+        return SymbolName;
+
+    // Remove any '_' or '@' prefix.
+    if(Front == '_' || Front == '@')
+        SymbolName++;
+
+    // Remove any '@[0-9]+' suffix.
+    auto AtPos = strrchr(SymbolName, '@');
+    if(AtPos)
+    {
+        auto p = AtPos + 1;
+        while(*p && isdigit(*p))
+            p++;
+
+        // All characters after '@' were digits
+        if(!*p)
+            *AtPos = '\0';
+    }
+
+    // Remove any ending '@' for vectorcall.
+    auto len = strlen(SymbolName);
+    if(len && SymbolName[len - 1] == '@')
+        SymbolName[len - 1] = '\0';
+
+    return SymbolName;
+}
+
 static bool getLabel(duint addr, char* label, bool noFuncOffset)
 {
     bool retval = false;
@@ -141,33 +190,49 @@ static bool getLabel(duint addr, char* label, bool noFuncOffset)
         PSYMBOL_INFO pSymbol = (PSYMBOL_INFO)buffer;
         pSymbol->SizeOfStruct = sizeof(SYMBOL_INFO);
         pSymbol->MaxNameLen = MAX_LABEL_SIZE;
-        if(SafeSymFromAddr(fdProcessInfo->hProcess, (DWORD64)addr, &displacement, pSymbol) && !displacement)
+        if(SafeSymFromAddr(fdProcessInfo->hProcess, (DWORD64)addr, &displacement, pSymbol) &&
+                (!displacement || (!noFuncOffset && pSymbol->Flags != SYMFLAG_EXPORT))) //without PDB, SYMFLAG_EXPORT is reported with garbage displacements
         {
             pSymbol->Name[pSymbol->MaxNameLen - 1] = '\0';
-            if(!bUndecorateSymbolNames || !SafeUnDecorateSymbolName(pSymbol->Name, label, MAX_LABEL_SIZE, UNDNAME_COMPLETE))
-                strcpy_s(label, MAX_LABEL_SIZE, pSymbol->Name);
+            auto name = demanglePE32ExternCFunc(pSymbol->Name);
+            if(!bUndecorateSymbolNames || !SafeUnDecorateSymbolName(name, label, MAX_LABEL_SIZE, UNDNAME_NAME_ONLY))
+                strcpy_s(label, MAX_LABEL_SIZE, name);
             retval = !shouldFilterSymbol(label);
+            if(retval && displacement)
+            {
+                char temp[32];
+                sprintf_s(temp, "+%llX", displacement);
+                strncat_s(label, MAX_LABEL_SIZE, temp, _TRUNCATE);
+            }
         }
-        if(!retval)  //search for CALL <jmp.&user32.MessageBoxA>
+        if(!retval) //search for CALL <jmp.&user32.MessageBoxA>
         {
             BASIC_INSTRUCTION_INFO basicinfo;
             memset(&basicinfo, 0, sizeof(BASIC_INSTRUCTION_INFO));
-            if(disasmfast(addr, &basicinfo, true) && basicinfo.branch && !basicinfo.call && basicinfo.memory.value)  //thing is a JMP
+            if(disasmfast(addr, &basicinfo, true) && basicinfo.branch && !basicinfo.call && basicinfo.memory.value) //thing is a JMP
             {
                 duint val = 0;
                 if(MemRead(basicinfo.memory.value, &val, sizeof(val), nullptr, true))
                 {
-                    if(SafeSymFromAddr(fdProcessInfo->hProcess, (DWORD64)val, &displacement, pSymbol) && !displacement)
+                    if(SafeSymFromAddr(fdProcessInfo->hProcess, (DWORD64)val, &displacement, pSymbol) &&
+                            (!displacement || (!noFuncOffset && pSymbol->Flags != SYMFLAG_EXPORT))) //without PDB, SYMFLAG_EXPORT is reported with garbage displacements
                     {
                         pSymbol->Name[pSymbol->MaxNameLen - 1] = '\0';
-                        if(!bUndecorateSymbolNames || !SafeUnDecorateSymbolName(pSymbol->Name, label, MAX_LABEL_SIZE, UNDNAME_COMPLETE))
-                            sprintf_s(label, MAX_LABEL_SIZE, "JMP.&%s", pSymbol->Name);
+                        auto name = demanglePE32ExternCFunc(pSymbol->Name);
+                        if(!bUndecorateSymbolNames || !SafeUnDecorateSymbolName(name, label, MAX_LABEL_SIZE, UNDNAME_NAME_ONLY))
+                            sprintf_s(label, MAX_LABEL_SIZE, "JMP.&%s", name);
                         retval = !shouldFilterSymbol(label);
+                        if(retval && displacement)
+                        {
+                            char temp[32];
+                            sprintf_s(temp, "+%llX", displacement);
+                            strncat_s(label, MAX_LABEL_SIZE, temp, _TRUNCATE);
+                        }
                     }
                 }
             }
         }
-        if(!retval)  //search for module entry
+        if(!retval) //search for module entry
         {
             if(addr != 0 && ModEntryFromAddr(addr) == addr)
             {
@@ -196,7 +261,7 @@ static bool getLabel(duint addr, char* label, bool noFuncOffset)
 #else //x86
                 sprintf_s(temp, "+%X", rva);
 #endif //_WIN64
-                strcat_s(label, MAX_LABEL_SIZE, temp);
+                strncat_s(label, MAX_LABEL_SIZE, temp, _TRUNCATE);
                 return true;
             }
         }
@@ -204,7 +269,7 @@ static bool getLabel(duint addr, char* label, bool noFuncOffset)
     return retval;
 }
 
-extern "C" DLL_EXPORT bool _dbg_addrinfoget(duint addr, SEGMENTREG segment, ADDRINFO* addrinfo)
+extern "C" DLL_EXPORT bool _dbg_addrinfoget(duint addr, SEGMENTREG segment, BRIDGE_ADDRINFO* addrinfo)
 {
     if(!DbgIsDebugging())
         return false;
@@ -251,7 +316,7 @@ extern "C" DLL_EXPORT bool _dbg_addrinfoget(duint addr, SEGMENTREG segment, ADDR
             DWORD dwDisplacement;
             IMAGEHLP_LINEW64 line;
             line.SizeOfStruct = sizeof(IMAGEHLP_LINE64);
-            if(SafeSymGetLineFromAddrW64(fdProcessInfo->hProcess, (DWORD64)addr, &dwDisplacement, &line) && !dwDisplacement)
+            if(!bNoSourceLineAutoComments && SafeSymGetLineFromAddrW64(fdProcessInfo->hProcess, (DWORD64)addr, &dwDisplacement, &line) && !dwDisplacement)
             {
                 wchar_t filename[deflen] = L"";
                 wcsncpy_s(filename, line.FileName, _TRUNCATE);
@@ -266,11 +331,11 @@ extern "C" DLL_EXPORT bool _dbg_addrinfoget(duint addr, SEGMENTREG segment, ADDR
 
             DISASM_INSTR instr;
             String temp_string;
-            ADDRINFO newinfo;
+            BRIDGE_ADDRINFO newinfo;
             char string_text[MAX_STRING_SIZE] = "";
 
             Capstone cp;
-            auto getregs = !bOnlyCipAutoComments || addr == GetContextDataEx(hActiveThread, UE_CIP);
+            auto getregs = !bOnlyCipAutoComments || addr == titcontext.cip;
             disasmget(cp, addr, &instr, getregs);
 
             //Ignore register values when not on CIP and OnlyCipAutoComments is enabled: https://github.com/x64dbg/x64dbg/issues/1383
@@ -282,7 +347,7 @@ extern "C" DLL_EXPORT bool _dbg_addrinfoget(duint addr, SEGMENTREG segment, ADDR
 
             for(int i = 0; i < instr.argcount; i++)
             {
-                memset(&newinfo, 0, sizeof(ADDRINFO));
+                memset(&newinfo, 0, sizeof(BRIDGE_ADDRINFO));
                 newinfo.flags = flaglabel;
 
                 STRING_TYPE strtype = str_none;
@@ -347,6 +412,12 @@ extern "C" DLL_EXPORT bool _dbg_addrinfoget(duint addr, SEGMENTREG segment, ADDR
                         temp_string.push_back(':');
                         temp_string.append(string_text);
                     }
+                    else if(*newinfo.label)
+                    {
+                        temp_string = instr.arg[i].mnemonic;
+                        temp_string.push_back(':');
+                        temp_string.append(newinfo.label);
+                    }
                 }
                 else
                     continue;
@@ -377,7 +448,7 @@ extern "C" DLL_EXPORT bool _dbg_addrinfoget(duint addr, SEGMENTREG segment, ADDR
     return info.retval;
 }
 
-extern "C" DLL_EXPORT bool _dbg_addrinfoset(duint addr, ADDRINFO* addrinfo)
+extern "C" DLL_EXPORT bool _dbg_addrinfoset(duint addr, BRIDGE_ADDRINFO* addrinfo)
 {
     bool retval = false;
     if(addrinfo->flags & flaglabel) //set label
@@ -479,7 +550,7 @@ static void Getx87StatusWordFields(X87STATUSWORDFIELDS* x87StatusWordFields, WOR
     x87StatusWordFields->C3 = valx87statuswordflagfromstring(StatusWord, "C3");
     x87StatusWordFields->D = valx87statuswordflagfromstring(StatusWord, "D");
     x87StatusWordFields->I = valx87statuswordflagfromstring(StatusWord, "I");
-    x87StatusWordFields->IR = valx87statuswordflagfromstring(StatusWord, "IR");
+    x87StatusWordFields->ES = valx87statuswordflagfromstring(StatusWord, "ES");
     x87StatusWordFields->O = valx87statuswordflagfromstring(StatusWord, "O");
     x87StatusWordFields->P = valx87statuswordflagfromstring(StatusWord, "P");
     x87StatusWordFields->SF = valx87statuswordflagfromstring(StatusWord, "SF");
@@ -563,7 +634,6 @@ extern "C" DLL_EXPORT bool _dbg_getregdump(REGDUMP* regdump)
         return true;
     }
 
-    TITAN_ENGINE_CONTEXT_t titcontext;
     if(!GetFullContextDataEx(hActiveThread, &titcontext))
         return false;
     TranslateTitanContextToRegContext(&titcontext, &regdump->regcontext);
@@ -618,6 +688,9 @@ extern "C" DLL_EXPORT int _dbg_getbplist(BPXTYPE type, BPMAP* bpmap)
     BP_TYPE currentBpType;
     switch(type)
     {
+    case bp_none:
+        currentBpType = BP_TYPE(-1);
+        break;
     case bp_normal:
         currentBpType = BPNORMAL;
         break;
@@ -639,7 +712,7 @@ extern "C" DLL_EXPORT int _dbg_getbplist(BPXTYPE type, BPMAP* bpmap)
     unsigned short slot = 0;
     for(int i = 0; i < bpcount; i++)
     {
-        if(list[i].type != currentBpType)
+        if(currentBpType != -1 && list[i].type != currentBpType)
             continue;
         BpToBridge(&list[i], &curBp);
         bridgeList.push_back(curBp);
@@ -673,58 +746,58 @@ extern "C" DLL_EXPORT duint _dbg_getbranchdestination(duint addr)
             {
 #ifndef _WIN64 //x32
             case X86_REG_EAX:
-                return GetContextDataEx(hActiveThread, UE_EAX);
+                return titcontext.cax;
             case X86_REG_EBX:
-                return GetContextDataEx(hActiveThread, UE_EBX);
+                return titcontext.cbx;
             case X86_REG_ECX:
-                return GetContextDataEx(hActiveThread, UE_ECX);
+                return titcontext.ccx;
             case X86_REG_EDX:
-                return GetContextDataEx(hActiveThread, UE_EDX);
+                return titcontext.cdx;
             case X86_REG_EBP:
-                return GetContextDataEx(hActiveThread, UE_EBP);
+                return titcontext.cbp;
             case X86_REG_ESP:
-                return GetContextDataEx(hActiveThread, UE_ESP);
+                return titcontext.csp;
             case X86_REG_ESI:
-                return GetContextDataEx(hActiveThread, UE_ESI);
+                return titcontext.csi;
             case X86_REG_EDI:
-                return GetContextDataEx(hActiveThread, UE_EDI);
+                return titcontext.cdi;
             case X86_REG_EIP:
-                return GetContextDataEx(hActiveThread, UE_EIP);
+                return titcontext.cip;
 #else //x64
             case X86_REG_RAX:
-                return GetContextDataEx(hActiveThread, UE_RAX);
+                return titcontext.cax;
             case X86_REG_RBX:
-                return GetContextDataEx(hActiveThread, UE_RBX);
+                return titcontext.cbx;
             case X86_REG_RCX:
-                return GetContextDataEx(hActiveThread, UE_RCX);
+                return titcontext.ccx;
             case X86_REG_RDX:
-                return GetContextDataEx(hActiveThread, UE_RDX);
+                return titcontext.cdx;
             case X86_REG_RBP:
-                return GetContextDataEx(hActiveThread, UE_RBP);
+                return titcontext.cbp;
             case X86_REG_RSP:
-                return GetContextDataEx(hActiveThread, UE_RSP);
+                return titcontext.csp;
             case X86_REG_RSI:
-                return GetContextDataEx(hActiveThread, UE_RSI);
+                return titcontext.csi;
             case X86_REG_RDI:
-                return GetContextDataEx(hActiveThread, UE_RDI);
+                return titcontext.cdi;
             case X86_REG_RIP:
-                return GetContextDataEx(hActiveThread, UE_RIP);
+                return titcontext.cip;
             case X86_REG_R8:
-                return GetContextDataEx(hActiveThread, UE_R8);
+                return titcontext.r8;
             case X86_REG_R9:
-                return GetContextDataEx(hActiveThread, UE_R9);
+                return titcontext.r9;
             case X86_REG_R10:
-                return GetContextDataEx(hActiveThread, UE_R10);
+                return titcontext.r10;
             case X86_REG_R11:
-                return GetContextDataEx(hActiveThread, UE_R11);
+                return titcontext.r11;
             case X86_REG_R12:
-                return GetContextDataEx(hActiveThread, UE_R12);
+                return titcontext.r12;
             case X86_REG_R13:
-                return GetContextDataEx(hActiveThread, UE_R13);
+                return titcontext.r13;
             case X86_REG_R14:
-                return GetContextDataEx(hActiveThread, UE_R14);
+                return titcontext.r14;
             case X86_REG_R15:
-                return GetContextDataEx(hActiveThread, UE_R15);
+                return titcontext.r15;
 #endif //_WIN64
             default:
                 return 0;
@@ -747,7 +820,7 @@ extern "C" DLL_EXPORT duint _dbg_getbranchdestination(duint addr)
     }
     if(cp.InGroup(CS_GRP_RET))
     {
-        auto csp = GetContextDataEx(hActiveThread, UE_CSP);
+        auto csp = titcontext.csp;
         duint dest = 0;
         if(MemRead(csp, &dest, sizeof(dest)))
             return dest;
@@ -764,7 +837,7 @@ extern "C" DLL_EXPORT duint _dbg_sendmessage(DBGMSG type, void* param1, void* pa
 {
     if(dbgisstopped())
     {
-        switch(type)  //ignore win events
+        switch(type) //ignore win events
         {
         //these functions are safe to call when we did not initialize yet
         case DBG_DEINITIALIZE_LOCKS:
@@ -899,6 +972,7 @@ extern "C" DLL_EXPORT duint _dbg_sendmessage(DBGMSG type, void* param1, void* pa
         valuesetsignedcalc(!settingboolget("Engine", "CalculationType")); //0:signed, 1:unsigned
         SetEngineVariable(UE_ENGINE_SET_DEBUG_PRIVILEGE, settingboolget("Engine", "EnableDebugPrivilege"));
         bOnlyCipAutoComments = settingboolget("Disassembler", "OnlyCipAutoComments");
+        bNoSourceLineAutoComments = settingboolget("Disassembler", "NoSourceLineAutoComments");
         bListAllPages = settingboolget("Engine", "ListAllPages");
         bUndecorateSymbolNames = settingboolget("Engine", "UndecorateSymbolNames");
         bEnableSourceDebugging = settingboolget("Engine", "EnableSourceDebugging");
@@ -908,6 +982,7 @@ extern "C" DLL_EXPORT duint _dbg_sendmessage(DBGMSG type, void* param1, void* pa
         bNoForegroundWindow = settingboolget("Gui", "NoForegroundWindow");
         bVerboseExceptionLogging = settingboolget("Engine", "VerboseExceptionLogging");
         bNoWow64SingleStepWorkaround = settingboolget("Engine", "NoWow64SingleStepWorkaround");
+        bQueryWorkingSet = settingboolget("Misc", "QueryWorkingSet");
         stackupdatesettings();
 
         duint setting;
@@ -929,7 +1004,10 @@ extern "C" DLL_EXPORT duint _dbg_sendmessage(DBGMSG type, void* param1, void* pa
         if(BridgeSettingGetUint("Engine", "Assembler", &setting))
             assemblerEngine = AssemblerEngine(setting);
         else
-            assemblerEngine = AssemblerEngine::XEDParse;
+        {
+            assemblerEngine = AssemblerEngine::asmjit;
+            BridgeSettingSetUint("Engine", "Assembler", duint(assemblerEngine));
+        }
 
         std::vector<char> settingText(MAX_SETTING_SIZE + 1, '\0');
         dbgclearignoredexceptions();
@@ -1217,46 +1295,7 @@ extern "C" DLL_EXPORT duint _dbg_sendmessage(DBGMSG type, void* param1, void* pa
 
     case DBG_GET_STRING_AT:
     {
-        auto addr = duint(param1);
-        if(!MemIsValidReadPtrUnsafe(addr, true))
-            return false;
-
-        auto readValidPtr = [](duint addr) -> duint
-        {
-            duint addrPtr;
-            if(MemReadUnsafe(addr, &addrPtr, sizeof(addrPtr)) && MemIsValidReadPtrUnsafe(addrPtr, true))
-                return addrPtr;
-            return 0;
-        };
-
-        auto dest = (char*)param2;
-        *dest = '\0';
-        char string[MAX_STRING_SIZE];
-        duint addrPtr = readValidPtr(addr);
-        STRING_TYPE strtype;
-        auto possibleUnicode = disasmispossiblestring(addr, &strtype) && strtype == str_unicode;
-        if(addrPtr && !possibleUnicode)
-        {
-            if(disasmgetstringat(addrPtr, &strtype, string, string, MAX_STRING_SIZE - 5))
-            {
-                if(int(strlen(string)) <= (strtype == str_ascii ? 3 : 2) && readValidPtr(addrPtr))
-                    return false;
-                if(strtype == str_ascii)
-                    sprintf_s(dest, MAX_STRING_SIZE, "&\"%s\"", string);
-                else //unicode
-                    sprintf_s(dest, MAX_STRING_SIZE, "&L\"%s\"", string);
-                return true;
-            }
-        }
-        if(disasmgetstringat(addr, &strtype, string, string, MAX_STRING_SIZE - 4))
-        {
-            if(strtype == str_ascii)
-                sprintf_s(dest, MAX_STRING_SIZE, "\"%s\"", string);
-            else //unicode
-                sprintf_s(dest, MAX_STRING_SIZE, "L\"%s\"", string);
-            return true;
-        }
-        return false;
+        return disasmgetstringatwrapper(duint(param1), (char*)param2);
     }
     break;
 
@@ -1382,6 +1421,33 @@ extern "C" DLL_EXPORT duint _dbg_sendmessage(DBGMSG type, void* param1, void* pa
     }
     break;
 
+    case DBG_ANALYZE_FUNCTION:
+    {
+        auto entry = duint(param1);
+        duint size;
+        auto base = MemFindBaseAddr(entry, &size);
+        if(!base || !MemIsValidReadPtr(entry))
+            return false;
+        auto modbase = ModBaseFromAddr(base);
+        if(modbase)
+            base = modbase, size = ModSizeFromAddr(modbase);
+        RecursiveAnalysis analysis(base, size, entry, 0, true);
+        analysis.Analyse();
+        auto graph = analysis.GetFunctionGraph(entry);
+        if(!graph)
+            return false;
+        *(BridgeCFGraphList*)param2 = graph->ToGraphList();
+        return true;
+    }
+    break;
+
+    case DBG_MENU_PREPARE:
+    {
+        PLUG_CB_MENUPREPARE info;
+        info.hMenu = int(param1);
+        plugincbcall(CB_MENUPREPARE, &info);
+    }
+    break;
     }
     return 0;
 }

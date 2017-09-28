@@ -46,6 +46,11 @@ PLUG_IMPEXP void _plugin_logputs(const char* text)
     dputs_untranslated(text);
 }
 
+PLUG_IMPEXP void _plugin_logprint(const char* text)
+{
+    dprintf_untranslated("%s", text);
+}
+
 PLUG_IMPEXP void _plugin_debugpause()
 {
     DebugUpdateGuiSetStateAsync(GetContextDataEx(hActiveThread, UE_CIP), true);
@@ -80,7 +85,7 @@ PLUG_IMPEXP bool _plugin_menuaddseparator(int hMenu)
 
 PLUG_IMPEXP bool _plugin_menuclear(int hMenu)
 {
-    return pluginmenuclear(hMenu);
+    return pluginmenuclear(hMenu, false);
 }
 
 PLUG_IMPEXP void _plugin_menuseticon(int hMenu, const ICONDATA* icon)
@@ -118,6 +123,21 @@ PLUG_IMPEXP void _plugin_menuentrysetname(int pluginHandle, int hEntry, const ch
     pluginmenuentrysetname(pluginHandle, hEntry, name);
 }
 
+PLUG_IMPEXP void _plugin_menuentrysethotkey(int pluginHandle, int hEntry, const char* hotkey)
+{
+    pluginmenuentrysethotkey(pluginHandle, hEntry, hotkey);
+}
+
+PLUG_IMPEXP bool _plugin_menuremove(int hMenu)
+{
+    return pluginmenuremove(hMenu);
+}
+
+PLUG_IMPEXP bool _plugin_menuentryremove(int pluginHandle, int hEntry)
+{
+    return pluginmenuentryremove(pluginHandle, hEntry);
+}
+
 PLUG_IMPEXP void _plugin_startscript(CBPLUGINSCRIPT cbScript)
 {
     dbgstartscriptthread(cbScript);
@@ -125,7 +145,7 @@ PLUG_IMPEXP void _plugin_startscript(CBPLUGINSCRIPT cbScript)
 
 PLUG_IMPEXP bool _plugin_waituntilpaused()
 {
-    while(DbgIsDebugging() && dbgisrunning())  //wait until the debugger paused
+    while(DbgIsDebugging() && dbgisrunning()) //wait until the debugger paused
     {
         Sleep(1);
         GuiProcessEvents(); //workaround for scripts being executed on the GUI thread
@@ -156,4 +176,14 @@ PLUG_IMPEXP bool _plugin_load(const char* pluginName)
 duint _plugin_hash(const void* data, duint size)
 {
     return murmurhash(data, int(size));
+}
+
+PLUG_IMPEXP bool _plugin_registerformatfunction(int pluginHandle, const char* type, CBPLUGINFORMATFUNCTION cbFunction, void* userdata)
+{
+    return pluginformatfuncregister(pluginHandle, type, cbFunction, userdata);
+}
+
+PLUG_IMPEXP bool _plugin_unregisterformatfunction(int pluginHandle, const char* type)
+{
+    return pluginformatfuncunregister(pluginHandle, type);
 }

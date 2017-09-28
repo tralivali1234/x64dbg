@@ -4,6 +4,7 @@
 #include "variable.h"
 #include "_scriptapi_stack.h"
 #include "debugger.h"
+#include <intrin.h>
 
 static bool ReadWriteVariable(const char* varname, const std::function<bool(duint*, int)> & callback)
 {
@@ -25,7 +26,7 @@ static bool ReadWriteVariable(const char* varname, const std::function<bool(duin
     if(!isvar || !valtostring(varname, set_value, true))
     {
         duint value;
-        if(valfromstring(varname, &value))  //if the var is a value already it's an invalid destination
+        if(valfromstring(varname, &value)) //if the var is a value already it's an invalid destination
         {
             dprintf(QT_TRANSLATE_NOOP("DBG", "Invalid variable \"%s\"\n"), varname);
             return false;
@@ -287,7 +288,7 @@ bool cbInstrCmp(int argc, char* argv[])
         ezflag = 1;
     else
         ezflag = 0;
-    if(valuesignedcalc())   //signed comparision
+    if(valuesignedcalc()) //signed comparision
     {
         if((dsint)arg1 < (dsint)arg2)
             bsflag = 0;
@@ -312,7 +313,7 @@ bool cbInstrMov(int argc, char* argv[])
     if(IsArgumentsLessThan(argc, 3))
         return false;
     String srcText = argv[2];
-    if(srcText[0] == '#' && srcText[srcText.length() - 1] == '#')   //handle mov addr, #DATA#
+    if(srcText[0] == '#' && srcText[srcText.length() - 1] == '#') //handle mov addr, #DATA#
     {
         //do some checks on the data
         String dataText = srcText.substr(1, srcText.length() - 2);
@@ -354,7 +355,7 @@ bool cbInstrMov(int argc, char* argv[])
         if(!isvar || !valtostring(argv[1], set_value, true))
         {
             duint value;
-            if(valfromstring(argv[1], &value))  //if the var is a value already it's an invalid destination
+            if(valfromstring(argv[1], &value)) //if the var is a value already it's an invalid destination
             {
                 dprintf(QT_TRANSLATE_NOOP("DBG", "Invalid dest \"%s\"\n"), argv[1]);
                 return false;

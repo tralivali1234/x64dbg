@@ -134,7 +134,6 @@ private:
     SelectionData_t mSelection;
 
     bool mIsLastInstDisplayed;
-    bool mIsRunning;
 
     GuiState_t mGuiState;
 
@@ -180,8 +179,19 @@ protected:
     QColor mTracedSelectedAddressBackgroundColor;
 
     QColor mBytesColor;
+    QColor mBytesBackgroundColor;
     QColor mModifiedBytesColor;
+    QColor mModifiedBytesBackgroundColor;
     QColor mRestoredBytesColor;
+    QColor mRestoredBytesBackgroundColor;
+    QColor mByte00Color;
+    QColor mByte00BackgroundColor;
+    QColor mByte7FColor;
+    QColor mByte7FBackgroundColor;
+    QColor mByteFFColor;
+    QColor mByteFFBackgroundColor;
+    QColor mByteIsPrintColor;
+    QColor mByteIsPrintBackgroundColor;
 
     QColor mAutoCommentColor;
     QColor mAutoCommentBackgroundColor;

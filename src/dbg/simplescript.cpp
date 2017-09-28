@@ -22,6 +22,8 @@ static bool volatile bAbort = false;
 
 static bool volatile bIsRunning = false;
 
+static bool scriptLogEnabled = false;
+
 enum CMDRESULT
 {
     STATUS_ERROR = false,
@@ -140,7 +142,7 @@ static bool scriptcreatelinemap(const char* filename)
         linemap.push_back(entry);
     }
     int linemapsize = (int)linemap.size();
-    while(!*linemap.at(linemapsize - 1).raw) //remove empty lines from the end
+    while(linemapsize && !*linemap.at(linemapsize - 1).raw) //remove empty lines from the end
     {
         linemapsize--;
         linemap.pop_back();
@@ -151,9 +153,35 @@ static bool scriptcreatelinemap(const char* filename)
 
         //temp. remove comments from the raw line
         char line_comment[256] = "";
-        char* comment = strstr(&cur.raw[0], "//");
-        if(!comment)
-            comment = strstr(&cur.raw[0], ";");
+        char* comment = nullptr;
+        {
+            auto len = strlen(cur.raw);
+            auto inquote = false;
+            auto inescape = false;
+            for(size_t i = 0; i < len; i++)
+            {
+                auto ch = cur.raw[i];
+                switch(ch) //simple state machine to determine if the "//" is in quotes
+                {
+                case '\"':
+                    if(!inescape)
+                        inquote = !inquote;
+                    inescape = false;
+                    break;
+                case '\\':
+                    inescape = !inescape;
+                    break;
+                default:
+                    inescape = false;
+                }
+                if(!inquote && ch == '/' && i + 1 < len && cur.raw[i + 1] == '/')
+                {
+                    comment = cur.raw + i;
+                    break;
+                }
+            }
+        }
+
         if(comment && comment != cur.raw) //only when the line doesnt start with a comment
         {
             if(*(comment - 1) == ' ') //space before comment
@@ -173,7 +201,7 @@ static bool scriptcreatelinemap(const char* filename)
         {
             cur.type = lineempty;
         }
-        else if(!strncmp(cur.raw, "//", 2) || *cur.raw == ';')  //comment
+        else if(!strncmp(cur.raw, "//", 2) || *cur.raw == ';') //comment
         {
             cur.type = linecomment;
             strcpy_s(cur.u.comment, cur.raw);
@@ -225,14 +253,14 @@ static bool scriptcreatelinemap(const char* filename)
 
         //append the comment to the raw line again
         if(*line_comment)
-            sprintf(cur.raw + rawlen, " %s", line_comment);
+            sprintf(cur.raw + rawlen, "\1%s", line_comment);
         linemap.at(i) = cur;
     }
     linemapsize = (int)linemap.size();
     for(int i = 0; i < linemapsize; i++)
     {
         auto & currentLine = linemap.at(i);
-        if(currentLine.type == linebranch)  //invalid branch label
+        if(currentLine.type == linebranch) //invalid branch label
         {
             int labelline = scriptlabelfind(currentLine.u.branch.branchlabel);
             if(!labelline) //invalid branch label
@@ -247,7 +275,7 @@ static bool scriptcreatelinemap(const char* filename)
                 currentLine.u.branch.dest = scriptinternalstep(labelline);
         }
     }
-    if(linemap.at(linemapsize - 1).type == linecomment || linemap.at(linemapsize - 1).type == linelabel) //label/comment on the end
+    if(linemapsize && (linemap.at(linemapsize - 1).type == linecomment || linemap.at(linemapsize - 1).type == linelabel)) //label/comment on the end
     {
         memset(&entry, 0, sizeof(entry));
         entry.type = linecommand;
@@ -307,6 +335,7 @@ static bool scriptisinternalcommand(const char* text, const char* cmd)
 
 static CMDRESULT scriptinternalcmdexec(const char* cmd)
 {
+    scriptLogEnabled = false;
     if(scriptisinternalcommand(cmd, "ret")) //script finished
     {
         if(!scriptstack.size()) //nothing on the stack
@@ -319,12 +348,19 @@ static CMDRESULT scriptinternalcmdexec(const char* cmd)
         scriptstack.pop_back(); //remove last stack entry
         return STATUS_CONTINUE;
     }
+    else if(scriptisinternalcommand(cmd, "error")) //show an error and end the script
+    {
+        GuiScriptError(0, StringUtils::Trim(cmd + strlen("error"), " \"'").c_str());
+        return STATUS_EXIT;
+    }
     else if(scriptisinternalcommand(cmd, "invalid")) //invalid command for testing
         return STATUS_ERROR;
     else if(scriptisinternalcommand(cmd, "pause")) //pause the script
         return STATUS_PAUSE;
     else if(scriptisinternalcommand(cmd, "nop")) //do nothing
         return STATUS_CONTINUE;
+    else if(scriptisinternalcommand(cmd, "log"))
+        scriptLogEnabled = true;
     auto res = cmddirectexec(cmd);
     while(DbgIsDebugging() && dbgisrunning() && !bAbort) //while not locked (NOTE: possible deadlock)
     {
@@ -381,6 +417,8 @@ static bool scriptinternalbranch(SCRIPTBRANCHTYPE type) //determine if we should
 static bool scriptinternalcmd()
 {
     bool bContinue = true;
+    if(size_t(scriptIp - 1) >= linemap.size())
+        return false;
     LINEMAPENTRY cur = linemap.at(scriptIp - 1);
     if(cur.type == linecommand)
     {
@@ -488,7 +526,10 @@ void scriptload(const char* filename)
 {
     static char filename_[MAX_PATH] = "";
     strcpy_s(filename_, filename);
-    CloseHandle(CreateThread(0, 0, scriptLoadSync, filename_, 0, 0));
+    auto hThread = CreateThread(nullptr, 0, scriptLoadSync, filename_, 0, nullptr);
+    while(WaitForSingleObject(hThread, 100) == WAIT_TIMEOUT)
+        GuiProcessEvents();
+    CloseHandle(hThread);
 }
 
 void scriptunload()
@@ -628,4 +669,11 @@ bool scriptgetbranchinfo(int line, SCRIPTBRANCH* info)
         return false;
     memcpy(info, &linemap.at(line - 1).u.branch, sizeof(SCRIPTBRANCH));
     return true;
+}
+
+void scriptlog(const char* msg)
+{
+    if(!scriptLogEnabled)
+        return;
+    GuiScriptSetInfoLine(scriptIp, msg);
 }

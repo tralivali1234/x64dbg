@@ -66,7 +66,7 @@ INCLUDEPATH += \
     Src/Global \
     Src/Utils \
     Src/ThirdPartyLibs/snowman \
-    Src/ThirdPartyLibs/float128 \
+    Src/ThirdPartyLibs/ldconvert \
     ../capstone_wrapper
 
 # Resources, sources, headers, and forms
@@ -147,7 +147,6 @@ SOURCES += \
     Src/Gui/NotepadView.cpp \
     Src/Gui/CPUMultiDump.cpp \
     Src/Gui/AssembleDialog.cpp \
-    Src/ThirdPartyLibs/float128/float128.cpp \
     Src/Utils/StringUtil.cpp \
     Src/Gui/SEHChainView.cpp \
     Src/Gui/EditBreakpointDialog.cpp \
@@ -176,7 +175,12 @@ SOURCES += \
     Src/Gui/StructWidget.cpp \
     Src/Gui/CustomizeMenuDialog.cpp \
     Src/Gui/SimpleTraceDialog.cpp \
-    Src/Gui/BreakpointsViewTable.cpp
+    Src/Utils/MRUList.cpp \
+    Src/Gui/LocalVarsView.cpp \
+    Src/Gui/MessagesBreakpoints.cpp \
+    Src/Gui/AboutDialog.cpp \
+    Src/Gui/BreakpointMenu.cpp \
+    Src/Gui/ComboBoxDialog.cpp
 
 
 HEADERS += \
@@ -256,10 +260,8 @@ HEADERS += \
     Src/Gui/NotesManager.h \
     Src/Gui/NotepadView.h \
     Src/Utils/MenuBuilder.h \
-    Src/Utils/QActionLambda.h \
     Src/Gui/CPUMultiDump.h \
     Src/Gui/AssembleDialog.h \
-    Src/ThirdPartyLibs/float128/float128.h \
     Src/Gui/SEHChainView.h \
     Src/Gui/EditBreakpointDialog.h \
     Src/Gui/CPUArgumentWidget.h \
@@ -288,7 +290,13 @@ HEADERS += \
     Src/Gui/CustomizeMenuDialog.h \
     Src/Gui/StructWidget.h \
     Src/Gui/SimpleTraceDialog.h \
-    Src/Gui/BreakpointsViewTable.h
+    Src/Utils/MRUList.h \
+    Src/Gui/LocalVarsView.h \
+    Src/Gui/MessagesBreakpoints.h \
+    Src/Gui/AboutDialog.h \
+    Src/Gui/BreakpointMenu.h \
+    Src/Gui/ComboBoxDialog.h \
+    Src/Utils/VaHistory.h
     
 
 FORMS += \
@@ -327,23 +335,28 @@ FORMS += \
     Src/Gui/VirtualModDialog.ui \
     Src/Gui/CustomizeMenuDialog.ui \
     Src/Gui/StructWidget.ui \
-    Src/Gui/SimpleTraceDialog.ui
+    Src/Gui/SimpleTraceDialog.ui \
+    Src/Gui/MessagesBreakpoints.ui \
+    Src/Gui/AboutDialog.ui \
+    Src/Gui/ComboBoxDialog.ui
 
 ##
 ## Libraries
 ##
-LIBS += -luser32 -ladvapi32
+LIBS += -luser32 -ladvapi32 -lwinmm -lshell32
 
 !contains(QMAKE_HOST.arch, x86_64) {
     # Windows x86 (32bit) specific build
     LIBS += -L"$$PWD/../capstone_wrapper/capstone" -lcapstone_x86
     LIBS += -L"$$PWD/../capstone_wrapper/bin/x32$${DIR_SUFFIX}" -lcapstone_wrapper
     LIBS += -L"$$PWD/Src/ThirdPartyLibs/snowman" -lsnowman_x86
+    LIBS += -L"$$PWD/Src/ThirdPartyLibs/ldconvert" -lldconvert_x86
     LIBS += -L"$${X64_BIN_DIR}" -lx32bridge
 } else {
     # Windows x64 (64bit) specific build
     LIBS += -L"$$PWD/../capstone_wrapper/capstone" -lcapstone_x64
     LIBS += -L"$$PWD/../capstone_wrapper/bin/x64$${DIR_SUFFIX}" -lcapstone_wrapper
     LIBS += -L"$$PWD/Src/ThirdPartyLibs/snowman" -lsnowman_x64
+    LIBS += -L"$$PWD/Src/ThirdPartyLibs/ldconvert" -lldconvert_x64
     LIBS += -L"$${X64_BIN_DIR}" -lx64bridge
 }

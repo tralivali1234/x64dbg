@@ -9,7 +9,7 @@ CapstoneTokenizer::CapstoneTokenizer(int maxModuleLength)
       isNop(false),
       _mnemonicType(TokenType::Uncategorized)
 {
-    SetConfig(false, false, false, false, false);
+    SetConfig(false, false, false, false, false, false, false);
 }
 
 CapstoneTokenizer::TokenColor colorNamesMap[CapstoneTokenizer::TokenType::Last];
@@ -172,18 +172,22 @@ void CapstoneTokenizer::UpdateConfig()
               ConfigBool("Disassembler", "TabbedMnemonic"),
               ConfigBool("Disassembler", "ArgumentSpaces"),
               ConfigBool("Disassembler", "MemorySpaces"),
-              ConfigBool("Disassembler", "NoHighlightOperands"));
+              ConfigBool("Disassembler", "NoHighlightOperands"),
+              ConfigBool("Disassembler", "NoCurrentModuleText"),
+              ConfigBool("Disassembler", "0xPrefixValues"));
     _maxModuleLength = (int)ConfigUint("Disassembler", "MaxModuleSize");
     UpdateStringPool();
 }
 
-void CapstoneTokenizer::SetConfig(bool bUppercase, bool bTabbedMnemonic, bool bArgumentSpaces, bool bMemorySpaces, bool bNoHighlightOperands)
+void CapstoneTokenizer::SetConfig(bool bUppercase, bool bTabbedMnemonic, bool bArgumentSpaces, bool bMemorySpaces, bool bNoHighlightOperands, bool bNoCurrentModuleText, bool b0xPrefixValues)
 {
     _bUppercase = bUppercase;
     _bTabbedMnemonic = bTabbedMnemonic;
     _bArgumentSpaces = bArgumentSpaces;
     _bMemorySpaces = bMemorySpaces;
     _bNoHighlightOperands = bNoHighlightOperands;
+    _bNoCurrentModuleText = bNoCurrentModuleText;
+    _b0xPrefixValues = b0xPrefixValues;
 }
 
 int CapstoneTokenizer::Size() const
@@ -322,7 +326,18 @@ QString CapstoneTokenizer::printValue(const TokenValue & value, bool expandModul
     duint addr = value.value;
     bool bHasLabel = DbgGetLabelAt(addr, SEG_DEFAULT, label_);
     labelText = QString(label_);
-    bool bHasModule = (expandModule && DbgGetModuleAt(addr, module_) && !QString(labelText).startsWith("JMP.&"));
+    bool bHasModule;
+    if(_bNoCurrentModuleText)
+    {
+        duint size, base;
+        base = DbgMemFindBaseAddr(this->GetCapstone().Address(), &size);
+        if(addr >= base && addr < base + size)
+            bHasModule = false;
+        else
+            bHasModule = (expandModule && DbgGetModuleAt(addr, module_) && !QString(labelText).startsWith("JMP.&"));
+    }
+    else
+        bHasModule = (expandModule && DbgGetModuleAt(addr, module_) && !QString(labelText).startsWith("JMP.&"));
     moduleText = QString(module_);
     if(maxModuleLength != -1)
         moduleText.truncate(maxModuleLength);
@@ -330,12 +345,14 @@ QString CapstoneTokenizer::printValue(const TokenValue & value, bool expandModul
         moduleText += ".";
     QString addrText = ToHexString(addr);
     QString finalText;
-    if(bHasLabel && bHasModule)  //<module.label>
+    if(bHasLabel && bHasModule) //<module.label>
         finalText = QString("<%1%2>").arg(moduleText).arg(labelText);
-    else if(bHasModule)  //module.addr
+    else if(bHasModule) //module.addr
         finalText = QString("%1%2").arg(moduleText).arg(addrText);
-    else if(bHasLabel)  //<label>
+    else if(bHasLabel) //<label>
         finalText = QString("<%1>").arg(labelText);
+    else if(_b0xPrefixValues)
+        finalText = QString("0x") + addrText;
     else
         finalText = addrText;
     return finalText;
@@ -475,13 +492,15 @@ bool CapstoneTokenizer::tokenizeRegOperand(const cs_x86_op & op)
         registerType = TokenType::YmmRegister;
     else if(reg >= X86_REG_ZMM0 && reg <= X86_REG_ZMM31)
         registerType = TokenType::ZmmRegister;
-    addToken(registerType, _cp.RegName(x86_reg(reg)));
+    else if(reg == ArchValue(X86_REG_FS, X86_REG_GS))
+        registerType = TokenType::MnemonicUnusual;
+    addToken(registerType, _cp.RegName(reg));
     return true;
 }
 
 bool CapstoneTokenizer::tokenizeImmOperand(const cs_x86_op & op)
 {
-    duint value = duint(op.imm);
+    auto value = duint(op.imm) & (duint(-1) >> (op.size ? 8 * (sizeof(duint) - op.size) : 0));
     auto valueType = TokenType::Value;
     if(_cp.InGroup(CS_GRP_JUMP) || _cp.InGroup(CS_GRP_CALL) || _cp.IsLoop())
         valueType = TokenType::Address;
@@ -501,10 +520,10 @@ bool CapstoneTokenizer::tokenizeMemOperand(const cs_x86_op & op)
 
     //memory segment
     const auto & mem = op.mem;
-    const char* segmentText = _cp.RegName(x86_reg(mem.segment));
+    const char* segmentText = _cp.RegName(mem.segment);
     if(mem.segment == X86_REG_INVALID) //segment not set
     {
-        switch(x86_reg(mem.base))
+        switch(mem.base)
         {
 #ifdef _WIN64
         case X86_REG_RSP:
@@ -520,12 +539,13 @@ bool CapstoneTokenizer::tokenizeMemOperand(const cs_x86_op & op)
             break;
         }
     }
-    addToken(TokenType::MemorySegment, segmentText);
+    auto segmentType = op.reg == ArchValue(X86_REG_FS, X86_REG_GS) ? TokenType::MnemonicUnusual : TokenType::MemorySegment;
+    addToken(segmentType, segmentText);
     addToken(TokenType::Uncategorized, ":");
 
     //memory opening bracket
     auto bracketsType = TokenType::MemoryBrackets;
-    switch(x86_reg(mem.base))
+    switch(mem.base)
     {
     case X86_REG_ESP:
     case X86_REG_RSP:
@@ -538,7 +558,7 @@ bool CapstoneTokenizer::tokenizeMemOperand(const cs_x86_op & op)
     addToken(bracketsType, "[");
 
     //stuff inside the brackets
-    if(mem.base == X86_REG_RIP)   //rip-relative (#replacement)
+    if(mem.base == X86_REG_RIP) //rip-relative (#replacement)
     {
         duint addr = _cp.Address() + duint(mem.disp) + _cp.Size();
         TokenValue value = TokenValue(op.size, addr);
@@ -548,16 +568,16 @@ bool CapstoneTokenizer::tokenizeMemOperand(const cs_x86_op & op)
     else //#base + #index * #scale + #displacement
     {
         bool prependPlus = false;
-        if(mem.base != X86_REG_INVALID)  //base register
+        if(mem.base != X86_REG_INVALID) //base register
         {
-            addToken(TokenType::MemoryBaseRegister, _cp.RegName(x86_reg(mem.base)));
+            addToken(TokenType::MemoryBaseRegister, _cp.RegName(mem.base));
             prependPlus = true;
         }
-        if(mem.index != X86_REG_INVALID)  //index register
+        if(mem.index != X86_REG_INVALID) //index register
         {
             if(prependPlus)
                 addMemoryOperator('+');
-            addToken(TokenType::MemoryIndexRegister, _cp.RegName(x86_reg(mem.index)));
+            addToken(TokenType::MemoryIndexRegister, _cp.RegName(mem.index));
             if(mem.scale > 1)
             {
                 addMemoryOperator('*');

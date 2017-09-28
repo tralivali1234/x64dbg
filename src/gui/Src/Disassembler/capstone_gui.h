@@ -147,7 +147,7 @@ public:
     bool Tokenize(duint addr, const unsigned char* data, int datasize, InstructionToken & instruction);
     bool TokenizeData(const QString & datatype, const QString & data, InstructionToken & instruction);
     void UpdateConfig();
-    void SetConfig(bool bUppercase, bool bTabbedMnemonic, bool bArgumentSpaces, bool bMemorySpaces, bool bNoHighlightOperands);
+    void SetConfig(bool bUppercase, bool bTabbedMnemonic, bool bArgumentSpaces, bool bMemorySpaces, bool bNoHighlightOperands, bool bNoCurrentModuleText, bool b0xPrefixValues);
     int Size() const;
     const Capstone & GetCapstone() const;
 
@@ -157,12 +157,11 @@ public:
     static bool TokenFromX(const InstructionToken & instr, SingleToken & token, int x, CachedFontMetrics* fontMetrics);
     static bool IsHighlightableToken(const SingleToken & token);
     static bool TokenEquals(const SingleToken* a, const SingleToken* b, bool ignoreSize = true);
-
-private:
     static void addColorName(TokenType type, QString color, QString backgroundColor);
     static void addStringsToPool(const QString & regs);
     static bool tokenTextPoolEquals(const QString & a, const QString & b);
 
+private:
     Capstone _cp;
     bool isNop;
     InstructionToken _inst;
@@ -173,6 +172,8 @@ private:
     bool _bArgumentSpaces;
     bool _bMemorySpaces;
     bool _bNoHighlightOperands;
+    bool _bNoCurrentModuleText;
+    bool _b0xPrefixValues;
     TokenType _mnemonicType;
 
     void addToken(TokenType type, QString text, const TokenValue & value);

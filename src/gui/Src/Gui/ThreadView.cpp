@@ -50,7 +50,7 @@ void ThreadView::setupContextMenu()
     QAction* mSetPriorityNormal = makeCommandAction(new QAction(tr("Normal"), this), "setprioritythread $, Normal");
     QAction* mSetPriorityTimeCritical = makeCommandAction(new QAction(tr("Time Critical"), this), "setprioritythread $, TimeCritical");
     MenuBuilder* mSetPriority = new MenuBuilder(this, [this, mSetPriorityIdle, mSetPriorityAboveNormal, mSetPriorityBelowNormal,
-            mSetPriorityHighest, mSetPriorityLowest, mSetPriorityNormal, mSetPriorityTimeCritical](QMenu*)
+                  mSetPriorityHighest, mSetPriorityLowest, mSetPriorityNormal, mSetPriorityTimeCritical](QMenu*)
     {
         QString priority = getCellContent(getInitialSelection(), 6);
         QAction* selectedaction = nullptr;
@@ -138,32 +138,38 @@ void ThreadView::ExecCommand()
     if(action)
     {
         QString command = action->data().toString();
-        command.replace(QChar('$'), getCellContent(getInitialSelection(), 1)); // $ -> Thread Id
-        DbgCmdExec(command.toUtf8().constData());
+        if(command.contains('$'))
+        {
+            for(int i : getSelection())
+            {
+                QString specializedCommand = command;
+                specializedCommand.replace(QChar('$'), getCellContent(i, 1)); // $ -> Thread Id
+                DbgCmdExec(specializedCommand.toUtf8().constData());
+            }
+        }
+        else
+            DbgCmdExec(command.toUtf8().constData());
     }
 }
 
 ThreadView::ThreadView(StdTable* parent) : StdTable(parent)
 {
+    enableMultiSelection(true);
     int charwidth = getCharWidth();
-    addColumnAt(8 + charwidth * sizeof(unsigned int) * 2, tr("Number"), false, "", SortBy::AsInt);
-    addColumnAt(8 + charwidth * sizeof(unsigned int) * 2, tr("ID"), false, "", SortBy::AsHex);
-    addColumnAt(8 + charwidth * sizeof(duint) * 2, tr("Entry"), false, "", SortBy::AsHex);
-    addColumnAt(8 + charwidth * sizeof(duint) * 2, tr("TEB"), false, "", SortBy::AsHex);
-#ifdef _WIN64
-    addColumnAt(8 + charwidth * sizeof(duint) * 2, tr("RIP"), false, "", SortBy::AsHex);
-#else
-    addColumnAt(8 + charwidth * sizeof(duint) * 2, tr("EIP"), false, "", SortBy::AsHex);
-#endif //_WIN64
-    addColumnAt(8 + charwidth * 14, tr("Suspend Count"), false, "", SortBy::AsInt);
-    addColumnAt(8 + charwidth * 12, tr("Priority"), false);
-    addColumnAt(8 + charwidth * 12, tr("Wait Reason"), false);
-    addColumnAt(8 + charwidth * 10, tr("Last Error"), false);
-    addColumnAt(8 + charwidth * 16, tr("User Time"), false);
-    addColumnAt(8 + charwidth * 16, tr("Kernel Time"), false);
-    addColumnAt(8 + charwidth * 16, tr("Creation Time"), false);
-    addColumnAt(8 + charwidth * 10, tr("CPU Cycles"), false, "", SortBy::AsInt);
-    addColumnAt(8, tr("Name"), false);
+    addColumnAt(8 + charwidth * sizeof(unsigned int) * 2, tr("Number"), true, "", SortBy::AsInt);
+    addColumnAt(8 + charwidth * sizeof(unsigned int) * 2, tr("ID"), true, "", SortBy::AsHex);
+    addColumnAt(8 + charwidth * sizeof(duint) * 2, tr("Entry"), true, "", SortBy::AsHex);
+    addColumnAt(8 + charwidth * sizeof(duint) * 2, tr("TEB"), true, "", SortBy::AsHex);
+    addColumnAt(8 + charwidth * sizeof(duint) * 2, ArchValue(tr("EIP"), tr("RIP")), true, "", SortBy::AsHex);
+    addColumnAt(8 + charwidth * 14, tr("Suspend Count"), true, "", SortBy::AsInt);
+    addColumnAt(8 + charwidth * 12, tr("Priority"), true);
+    addColumnAt(8 + charwidth * 12, tr("Wait Reason"), true);
+    addColumnAt(8 + charwidth * 10, tr("Last Error"), true, "", SortBy::AsHex);
+    addColumnAt(8 + charwidth * 16, tr("User Time"), true);
+    addColumnAt(8 + charwidth * 16, tr("Kernel Time"), true);
+    addColumnAt(8 + charwidth * 16, tr("Creation Time"), true);
+    addColumnAt(8 + charwidth * 10, tr("CPU Cycles"), true, "", SortBy::AsHex);
+    addColumnAt(8, tr("Name"), true);
     loadColumnFromConfig("Thread");
 
     //setCopyMenuOnly(true);
@@ -366,7 +372,7 @@ QString ThreadView::paintContent(QPainter* painter, dsint rowBase, int rowOffset
     {
         painter->fillRect(QRect(x, y, w, h), QBrush(ConfigColor("ThreadCurrentBackgroundColor")));
         painter->setPen(QPen(ConfigColor("ThreadCurrentColor"))); //white text
-        painter->drawText(QRect(x + 4, y , w - 4 , h), Qt::AlignVCenter | Qt::AlignLeft, ret);
+        painter->drawText(QRect(x + 4, y, w - 4, h), Qt::AlignVCenter | Qt::AlignLeft, ret);
         ret = "";
     }
     return ret;
@@ -382,7 +388,7 @@ void ThreadView::SetNameSlot()
 {
     QString threadId = getCellContent(getInitialSelection(), 1);
     LineEditDialog mLineEdit(this);
-    mLineEdit.setWindowTitle(tr("Name"));
+    mLineEdit.setWindowTitle(tr("Name") + threadId);
     mLineEdit.setText(getCellContent(getInitialSelection(), 13));
     if(mLineEdit.exec() != QDialog::Accepted)
         return;

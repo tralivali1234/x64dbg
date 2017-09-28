@@ -128,28 +128,31 @@ bool cbDebugSetBPX(int argc, char* argv[]) //bp addr [,name [,type]]
         dprintf(QT_TRANSLATE_NOOP("DBG", "Error setting breakpoint at %p! (bpnew)\n"), addr);
         return false;
     }
-    GuiUpdateAllViews();
     if(!SetBPX(addr, type, (void*)cbUserBreakpoint))
     {
-        if(!MemIsValidReadPtr(addr))
-            return true;
         dprintf(QT_TRANSLATE_NOOP("DBG", "Error setting breakpoint at %p! (SetBPX)\n"), addr);
+        if(!BpDelete(addr, BPNORMAL))
+            dprintf(QT_TRANSLATE_NOOP("DBG", "Error handling invalid breakpoint at %p! (bpdel)\n"), addr);
         return false;
     }
-    dprintf(QT_TRANSLATE_NOOP("DBG", "Breakpoint at %p set!\n"), addr);
+    GuiUpdateAllViews();
+    if(bpname)
+        dprintf(QT_TRANSLATE_NOOP("DBG", "Breakpoint at %p (%s) set!\n"), addr, bpname);
+    else
+        dprintf(QT_TRANSLATE_NOOP("DBG", "Breakpoint at %p set!\n"), addr);
     return true;
 }
 
 bool cbDebugDeleteBPX(int argc, char* argv[])
 {
-    if(argc < 2)  //delete all breakpoints
+    if(argc < 2) //delete all breakpoints
     {
         if(!BpGetCount(BPNORMAL))
         {
             dputs(QT_TRANSLATE_NOOP("DBG", "No breakpoints to delete!"));
             return true;
         }
-        if(!BpEnumAll(cbDeleteAllBreakpoints))   //at least one deletion failed
+        if(!BpEnumAll(cbDeleteAllBreakpoints)) //at least one deletion failed
         {
             GuiUpdateAllViews();
             return false;
@@ -159,7 +162,7 @@ bool cbDebugDeleteBPX(int argc, char* argv[])
         return true;
     }
     BREAKPOINT found;
-    if(BpGet(0, BPNORMAL, argv[1], &found))  //found a breakpoint with name
+    if(BpGet(0, BPNORMAL, argv[1], &found)) //found a breakpoint with name
     {
         if(!BpDelete(found.addr, BPNORMAL))
         {
@@ -177,7 +180,7 @@ bool cbDebugDeleteBPX(int argc, char* argv[])
         return true;
     }
     duint addr = 0;
-    if(!valfromstring(argv[1], &addr) || !BpGet(addr, BPNORMAL, 0, &found))  //invalid breakpoint
+    if(!valfromstring(argv[1], &addr) || !BpGet(addr, BPNORMAL, 0, &found)) //invalid breakpoint
     {
         dprintf(QT_TRANSLATE_NOOP("DBG", "No such breakpoint \"%s\"\n"), argv[1]);
         return false;
@@ -202,21 +205,21 @@ bool cbDebugDeleteBPX(int argc, char* argv[])
 
 bool cbDebugEnableBPX(int argc, char* argv[])
 {
-    if(argc < 2)  //enable all breakpoints
+    if(argc < 2) //enable all breakpoints
     {
         if(!BpGetCount(BPNORMAL))
         {
             dputs(QT_TRANSLATE_NOOP("DBG", "No breakpoints to enable!"));
             return true;
         }
-        if(!BpEnumAll(cbEnableAllBreakpoints))  //at least one enable failed
+        if(!BpEnumAll(cbEnableAllBreakpoints)) //at least one enable failed
             return false;
         dputs(QT_TRANSLATE_NOOP("DBG", "All breakpoints enabled!"));
         GuiUpdateAllViews();
         return true;
     }
     BREAKPOINT found;
-    if(BpGet(0, BPNORMAL, argv[1], &found))  //found a breakpoint with name
+    if(BpGet(0, BPNORMAL, argv[1], &found)) //found a breakpoint with name
     {
         if(!SetBPX(found.addr, found.titantype, (void*)cbUserBreakpoint))
         {
@@ -232,7 +235,7 @@ bool cbDebugEnableBPX(int argc, char* argv[])
         return true;
     }
     duint addr = 0;
-    if(!valfromstring(argv[1], &addr) || !BpGet(addr, BPNORMAL, 0, &found))  //invalid breakpoint
+    if(!valfromstring(argv[1], &addr) || !BpGet(addr, BPNORMAL, 0, &found)) //invalid breakpoint
     {
         dprintf(QT_TRANSLATE_NOOP("DBG", "No such breakpoint \"%s\"\n"), argv[1]);
         return false;
@@ -260,21 +263,21 @@ bool cbDebugEnableBPX(int argc, char* argv[])
 
 bool cbDebugDisableBPX(int argc, char* argv[])
 {
-    if(argc < 2)  //delete all breakpoints
+    if(argc < 2) //delete all breakpoints
     {
         if(!BpGetCount(BPNORMAL))
         {
             dputs(QT_TRANSLATE_NOOP("DBG", "No breakpoints to disable!"));
             return true;
         }
-        if(!BpEnumAll(cbDisableAllBreakpoints))  //at least one deletion failed
+        if(!BpEnumAll(cbDisableAllBreakpoints)) //at least one deletion failed
             return false;
         dputs(QT_TRANSLATE_NOOP("DBG", "All breakpoints disabled!"));
         GuiUpdateAllViews();
         return true;
     }
     BREAKPOINT found;
-    if(BpGet(0, BPNORMAL, argv[1], &found))  //found a breakpoint with name
+    if(BpGet(0, BPNORMAL, argv[1], &found)) //found a breakpoint with name
     {
         if(!BpEnable(found.addr, BPNORMAL, false))
         {
@@ -293,7 +296,7 @@ bool cbDebugDisableBPX(int argc, char* argv[])
         return true;
     }
     duint addr = 0;
-    if(!valfromstring(argv[1], &addr) || !BpGet(addr, BPNORMAL, 0, &found))  //invalid breakpoint
+    if(!valfromstring(argv[1], &addr) || !BpGet(addr, BPNORMAL, 0, &found)) //invalid breakpoint
     {
         dprintf(QT_TRANSLATE_NOOP("DBG", "No such breakpoint \"%s\"\n"), argv[1]);
         return false;
@@ -475,21 +478,21 @@ bool cbDebugSetHardwareBreakpoint(int argc, char* argv[])
 
 bool cbDebugDeleteHardwareBreakpoint(int argc, char* argv[])
 {
-    if(argc < 2)   //delete all breakpoints
+    if(argc < 2) //delete all breakpoints
     {
         if(!BpGetCount(BPHARDWARE))
         {
             dputs(QT_TRANSLATE_NOOP("DBG", "No hardware breakpoints to delete!"));
             return true;
         }
-        if(!BpEnumAll(cbDeleteAllHardwareBreakpoints))   //at least one deletion failed
+        if(!BpEnumAll(cbDeleteAllHardwareBreakpoints)) //at least one deletion failed
             return false;
         dputs(QT_TRANSLATE_NOOP("DBG", "All hardware breakpoints deleted!"));
         GuiUpdateAllViews();
         return true;
     }
     BREAKPOINT found;
-    if(BpGet(0, BPHARDWARE, argv[1], &found))   //found a breakpoint with name
+    if(BpGet(0, BPHARDWARE, argv[1], &found)) //found a breakpoint with name
     {
         if(!BpDelete(found.addr, BPHARDWARE))
         {
@@ -504,7 +507,7 @@ bool cbDebugDeleteHardwareBreakpoint(int argc, char* argv[])
         return true;
     }
     duint addr = 0;
-    if(!valfromstring(argv[1], &addr) || !BpGet(addr, BPHARDWARE, 0, &found))   //invalid breakpoint
+    if(!valfromstring(argv[1], &addr) || !BpGet(addr, BPHARDWARE, 0, &found)) //invalid breakpoint
     {
         dprintf(QT_TRANSLATE_NOOP("DBG", "No such hardware breakpoint \"%s\"\n"), argv[1]);
         return false;
@@ -532,14 +535,14 @@ bool cbDebugEnableHardwareBreakpoint(int argc, char* argv[])
         dputs(QT_TRANSLATE_NOOP("DBG", "You can only set 4 hardware breakpoints"));
         return false;
     }
-    if(argc < 2)   //enable all hardware breakpoints
+    if(argc < 2) //enable all hardware breakpoints
     {
         if(!BpGetCount(BPHARDWARE))
         {
             dputs(QT_TRANSLATE_NOOP("DBG", "No hardware breakpoints to enable!"));
             return true;
         }
-        if(!BpEnumAll(cbEnableAllHardwareBreakpoints))   //at least one enable failed
+        if(!BpEnumAll(cbEnableAllHardwareBreakpoints)) //at least one enable failed
             return false;
         dputs(QT_TRANSLATE_NOOP("DBG", "All hardware breakpoints enabled!"));
         GuiUpdateAllViews();
@@ -547,7 +550,7 @@ bool cbDebugEnableHardwareBreakpoint(int argc, char* argv[])
     }
     BREAKPOINT found;
     duint addr = 0;
-    if(!valfromstring(argv[1], &addr) || !BpGet(addr, BPHARDWARE, 0, &found))   //invalid hardware breakpoint
+    if(!valfromstring(argv[1], &addr) || !BpGet(addr, BPHARDWARE, 0, &found)) //invalid hardware breakpoint
     {
         dprintf(QT_TRANSLATE_NOOP("DBG", "No such hardware breakpoint \"%s\"\n"), argv[1]);
         return false;
@@ -577,14 +580,14 @@ bool cbDebugEnableHardwareBreakpoint(int argc, char* argv[])
 
 bool cbDebugDisableHardwareBreakpoint(int argc, char* argv[])
 {
-    if(argc < 2)   //delete all hardware breakpoints
+    if(argc < 2) //delete all hardware breakpoints
     {
         if(!BpGetCount(BPHARDWARE))
         {
             dputs(QT_TRANSLATE_NOOP("DBG", "No hardware breakpoints to disable!"));
             return true;
         }
-        if(!BpEnumAll(cbDisableAllHardwareBreakpoints))   //at least one deletion failed
+        if(!BpEnumAll(cbDisableAllHardwareBreakpoints)) //at least one deletion failed
             return false;
         dputs(QT_TRANSLATE_NOOP("DBG", "All hardware breakpoints disabled!"));
         GuiUpdateAllViews();
@@ -592,7 +595,7 @@ bool cbDebugDisableHardwareBreakpoint(int argc, char* argv[])
     }
     BREAKPOINT found;
     duint addr = 0;
-    if(!valfromstring(argv[1], &addr) || !BpGet(addr, BPHARDWARE, 0, &found))   //invalid hardware breakpoint
+    if(!valfromstring(argv[1], &addr) || !BpGet(addr, BPHARDWARE, 0, &found)) //invalid hardware breakpoint
     {
         dprintf(QT_TRANSLATE_NOOP("DBG", "No such hardware breakpoint \"%s\"\n"), argv[1]);
         return false;
@@ -727,7 +730,7 @@ bool cbDebugSetMemoryBpx(int argc, char* argv[])
         dputs(QT_TRANSLATE_NOOP("DBG", "Memory breakpoint already set!"));
         return true;
     }
-    if(!BpNew(base, true, singleshoot, 0, BPMEMORY, type, 0))
+    if(!BpNew(base, true, singleshoot, 0, BPMEMORY, type, 0, size))
     {
         dputs(QT_TRANSLATE_NOOP("DBG", "Error setting memory breakpoint! (BpNew)"));
         return false;
@@ -744,21 +747,21 @@ bool cbDebugSetMemoryBpx(int argc, char* argv[])
 
 bool cbDebugDeleteMemoryBreakpoint(int argc, char* argv[])
 {
-    if(argc < 2)   //delete all breakpoints
+    if(argc < 2) //delete all breakpoints
     {
         if(!BpGetCount(BPMEMORY))
         {
             dputs(QT_TRANSLATE_NOOP("DBG", "No memory breakpoints to delete!"));
             return true;
         }
-        if(!BpEnumAll(cbDeleteAllMemoryBreakpoints))   //at least one deletion failed
+        if(!BpEnumAll(cbDeleteAllMemoryBreakpoints)) //at least one deletion failed
             return false;
         dputs(QT_TRANSLATE_NOOP("DBG", "All memory breakpoints deleted!"));
         GuiUpdateAllViews();
         return true;
     }
     BREAKPOINT found;
-    if(BpGet(0, BPMEMORY, argv[1], &found))   //found a breakpoint with name
+    if(BpGet(0, BPMEMORY, argv[1], &found)) //found a breakpoint with name
     {
         duint size;
         MemFindBaseAddr(found.addr, &size);
@@ -775,7 +778,7 @@ bool cbDebugDeleteMemoryBreakpoint(int argc, char* argv[])
         return true;
     }
     duint addr = 0;
-    if(!valfromstring(argv[1], &addr) || !BpGet(addr, BPMEMORY, 0, &found))   //invalid breakpoint
+    if(!valfromstring(argv[1], &addr) || !BpGet(addr, BPMEMORY, 0, &found)) //invalid breakpoint
     {
         dprintf(QT_TRANSLATE_NOOP("DBG", "No such memory breakpoint \"%s\"\n"), argv[1]);
         return false;
@@ -799,14 +802,14 @@ bool cbDebugDeleteMemoryBreakpoint(int argc, char* argv[])
 
 bool cbDebugEnableMemoryBreakpoint(int argc, char* argv[])
 {
-    if(argc < 2)   //enable all memory breakpoints
+    if(argc < 2) //enable all memory breakpoints
     {
         if(!BpGetCount(BPMEMORY))
         {
             dputs(QT_TRANSLATE_NOOP("DBG", "No memory breakpoints to enable!"));
             return true;
         }
-        if(!BpEnumAll(cbEnableAllMemoryBreakpoints))   //at least one enable failed
+        if(!BpEnumAll(cbEnableAllMemoryBreakpoints)) //at least one enable failed
             return false;
         dputs(QT_TRANSLATE_NOOP("DBG", "All memory breakpoints enabled!"));
         GuiUpdateAllViews();
@@ -814,7 +817,7 @@ bool cbDebugEnableMemoryBreakpoint(int argc, char* argv[])
     }
     BREAKPOINT found;
     duint addr = 0;
-    if(!valfromstring(argv[1], &addr) || !BpGet(addr, BPMEMORY, 0, &found))   //invalid memory breakpoint
+    if(!valfromstring(argv[1], &addr) || !BpGet(addr, BPMEMORY, 0, &found)) //invalid memory breakpoint
     {
         dprintf(QT_TRANSLATE_NOOP("DBG", "No such memory breakpoint \"%s\"\n"), argv[1]);
         return false;
@@ -844,14 +847,14 @@ bool cbDebugEnableMemoryBreakpoint(int argc, char* argv[])
 
 bool cbDebugDisableMemoryBreakpoint(int argc, char* argv[])
 {
-    if(argc < 2)   //disable all memory breakpoints
+    if(argc < 2) //disable all memory breakpoints
     {
         if(!BpGetCount(BPMEMORY))
         {
             dputs(QT_TRANSLATE_NOOP("DBG", "No memory breakpoints to disable!"));
             return true;
         }
-        if(!BpEnumAll(cbDisableAllMemoryBreakpoints))   //at least one deletion failed
+        if(!BpEnumAll(cbDisableAllMemoryBreakpoints)) //at least one deletion failed
             return false;
         dputs(QT_TRANSLATE_NOOP("DBG", "All memory breakpoints disabled!"));
         GuiUpdateAllViews();
@@ -859,7 +862,7 @@ bool cbDebugDisableMemoryBreakpoint(int argc, char* argv[])
     }
     BREAKPOINT found;
     duint addr = 0;
-    if(!valfromstring(argv[1], &addr) || !BpGet(addr, BPMEMORY, 0, &found))   //invalid memory breakpoint
+    if(!valfromstring(argv[1], &addr) || !BpGet(addr, BPMEMORY, 0, &found)) //invalid memory breakpoint
     {
         dprintf(QT_TRANSLATE_NOOP("DBG", "No such memory breakpoint \"%s\"\n"), argv[1]);
         return false;
@@ -984,7 +987,7 @@ bool cbDebugBcDll(int argc, char* argv[])
             dputs(QT_TRANSLATE_NOOP("DBG", "No DLL breakpoints to delete!"));
             return true;
         }
-        if(!BpEnumAll(cbDeleteAllDllBreakpoints))   //at least one deletion failed
+        if(!BpEnumAll(cbDeleteAllDllBreakpoints)) //at least one deletion failed
             return false;
         dputs(QT_TRANSLATE_NOOP("DBG", "All DLL breakpoints deleted!"));
         DebugUpdateBreakpointsViewAsync();
@@ -1010,14 +1013,14 @@ bool cbDebugBcDll(int argc, char* argv[])
 
 bool cbDebugBpDllEnable(int argc, char* argv[])
 {
-    if(argc < 2)   //disable all DLL breakpoints
+    if(argc < 2) //disable all DLL breakpoints
     {
         if(!BpGetCount(BPDLL))
         {
             dputs(QT_TRANSLATE_NOOP("DBG", "No DLL breakpoints to enable!"));
             return true;
         }
-        if(!BpEnumAll(cbEnableAllDllBreakpoints))   //at least one deletion failed
+        if(!BpEnumAll(cbEnableAllDllBreakpoints)) //at least one deletion failed
             return false;
         dputs(QT_TRANSLATE_NOOP("DBG", "All DLL breakpoints enabled!"));
         GuiUpdateAllViews();
@@ -1025,7 +1028,7 @@ bool cbDebugBpDllEnable(int argc, char* argv[])
     }
     BREAKPOINT found;
     duint addr = 0;
-    if(!BpGetAny(BPDLL, argv[1], &found))   //invalid DLL breakpoint
+    if(!BpGetAny(BPDLL, argv[1], &found)) //invalid DLL breakpoint
     {
         dprintf(QT_TRANSLATE_NOOP("DBG", "No such DLL breakpoint \"%s\"\n"), argv[1]);
         return false;
@@ -1051,14 +1054,14 @@ bool cbDebugBpDllEnable(int argc, char* argv[])
 
 bool cbDebugBpDllDisable(int argc, char* argv[])
 {
-    if(argc < 2)   //disable all DLL breakpoints
+    if(argc < 2) //disable all DLL breakpoints
     {
         if(!BpGetCount(BPDLL))
         {
             dputs(QT_TRANSLATE_NOOP("DBG", "No DLL breakpoints to disable!"));
             return true;
         }
-        if(!BpEnumAll(cbDisableAllDllBreakpoints))   //at least one deletion failed
+        if(!BpEnumAll(cbDisableAllDllBreakpoints)) //at least one deletion failed
             return false;
         dputs(QT_TRANSLATE_NOOP("DBG", "All DLL breakpoints disabled!"));
         GuiUpdateAllViews();
@@ -1066,7 +1069,7 @@ bool cbDebugBpDllDisable(int argc, char* argv[])
     }
     BREAKPOINT found;
     duint addr = 0;
-    if(!BpGetAny(BPDLL, argv[1], &found))   //invalid DLL breakpoint
+    if(!BpGetAny(BPDLL, argv[1], &found)) //invalid DLL breakpoint
     {
         dprintf(QT_TRANSLATE_NOOP("DBG", "No such DLL breakpoint \"%s\"\n"), argv[1]);
         return false;
@@ -1149,22 +1152,41 @@ bool cbDebugSetExceptionBPX(int argc, char* argv[])
         dprintf(QT_TRANSLATE_NOOP("DBG", "Exception breakpoint %X (%s) already exists!\n"), DWORD(ExceptionCode), ExceptionName.c_str());
         return false;
     }
-    duint chance = 1;
+    auto extype = ex_firstchance;
     if(argc > 2)
     {
-        if(!valfromstring(argv[2], &chance))
+        duint chance;
+        if(scmp(argv[2], "first"))
+            extype = ex_firstchance;
+        else if(scmp(argv[2], "second"))
+            extype = ex_secondchance;
+        else if(scmp(argv[2], "all"))
+            extype = ex_all;
+        else if(valfromstring(argv[2], &chance))
         {
-            dputs(QT_TRANSLATE_NOOP("DBG", "Invalid expression!"));
+            switch(chance)
+            {
+            case 1:
+                extype = ex_firstchance;
+                break;
+            case 2:
+                extype = ex_secondchance;
+                break;
+            case 3:
+                extype = ex_all;
+                break;
+            default:
+                _plugin_logprintf(QT_TRANSLATE_NOOP("DBG", "Invalid exception type!"));
+                return false;
+            }
+        }
+        else
+        {
+            _plugin_logprintf(QT_TRANSLATE_NOOP("DBG", "Invalid exception type!"));
             return false;
         }
-        // range limit
-        // chance: 1=first chance, 2=second chance, 3=all
-        if(chance > 3)
-            chance = 3;
-        if(chance == 0)
-            chance = 1;
     }
-    if(!BpNew(ExceptionCode, true, false, 0, BPEXCEPTION, DWORD(chance), ""))
+    if(!BpNew(ExceptionCode, true, false, 0, BPEXCEPTION, extype, ""))
     {
         dputs(QT_TRANSLATE_NOOP("DBG", "Failed to set exception breakpoint! (BpNew)"));
         return false;
@@ -1183,14 +1205,14 @@ bool cbDebugDeleteExceptionBPX(int argc, char* argv[])
             dputs(QT_TRANSLATE_NOOP("DBG", "No exception breakpoints to delete!"));
             return true;
         }
-        if(!BpEnumAll(cbDeleteAllExceptionBreakpoints))  //at least one enable failed
+        if(!BpEnumAll(cbDeleteAllExceptionBreakpoints)) //at least one enable failed
             return false;
         dputs(QT_TRANSLATE_NOOP("DBG", "All exception breakpoints deleted!"));
         DebugUpdateBreakpointsViewAsync();
         return true;
     }
     BREAKPOINT found;
-    if(BpGet(0, BPEXCEPTION, argv[1], &found))  //found a breakpoint with name
+    if(BpGet(0, BPEXCEPTION, argv[1], &found)) //found a breakpoint with name
     {
         if(!BpDelete(found.addr, BPEXCEPTION))
         {
@@ -1200,7 +1222,7 @@ bool cbDebugDeleteExceptionBPX(int argc, char* argv[])
         return true;
     }
     duint addr = 0;
-    if((!ExceptionNameToCode(argv[1], reinterpret_cast<unsigned int*>(&addr)) && !valfromstring(argv[1], &addr)) || !BpGet(addr, BPEXCEPTION, 0, &found))  //invalid breakpoint
+    if((!ExceptionNameToCode(argv[1], reinterpret_cast<unsigned int*>(&addr)) && !valfromstring(argv[1], &addr)) || !BpGet(addr, BPEXCEPTION, 0, &found)) //invalid breakpoint
     {
         dprintf(QT_TRANSLATE_NOOP("DBG", "No such exception breakpoint \"%s\"\n"), argv[1]);
         return false;
@@ -1217,21 +1239,21 @@ bool cbDebugDeleteExceptionBPX(int argc, char* argv[])
 
 bool cbDebugEnableExceptionBPX(int argc, char* argv[])
 {
-    if(argc < 2)  //enable all breakpoints
+    if(argc < 2) //enable all breakpoints
     {
         if(!BpGetCount(BPEXCEPTION))
         {
             dputs(QT_TRANSLATE_NOOP("DBG", "No exception breakpoints to enable!"));
             return true;
         }
-        if(!BpEnumAll(cbEnableAllExceptionBreakpoints))  //at least one enable failed
+        if(!BpEnumAll(cbEnableAllExceptionBreakpoints)) //at least one enable failed
             return false;
         dputs(QT_TRANSLATE_NOOP("DBG", "All exception breakpoints enabled!"));
         DebugUpdateBreakpointsViewAsync();
         return true;
     }
     BREAKPOINT found;
-    if(BpGet(0, BPEXCEPTION, argv[1], &found))  //found a breakpoint with name
+    if(BpGet(0, BPEXCEPTION, argv[1], &found)) //found a breakpoint with name
     {
         if(!BpEnable(found.addr, BPEXCEPTION, true))
         {
@@ -1242,7 +1264,7 @@ bool cbDebugEnableExceptionBPX(int argc, char* argv[])
         return true;
     }
     duint addr = 0;
-    if((!ExceptionNameToCode(argv[1], reinterpret_cast<unsigned int*>(&addr)) && !valfromstring(argv[1], &addr)) || !BpGet(addr, BPEXCEPTION, 0, &found))  //invalid breakpoint
+    if((!ExceptionNameToCode(argv[1], reinterpret_cast<unsigned int*>(&addr)) && !valfromstring(argv[1], &addr)) || !BpGet(addr, BPEXCEPTION, 0, &found)) //invalid breakpoint
     {
         dprintf(QT_TRANSLATE_NOOP("DBG", "No such exception breakpoint \"%s\"\n"), argv[1]);
         return false;
@@ -1265,21 +1287,21 @@ bool cbDebugEnableExceptionBPX(int argc, char* argv[])
 
 bool cbDebugDisableExceptionBPX(int argc, char* argv[])
 {
-    if(argc < 2)  //disable all breakpoints
+    if(argc < 2) //disable all breakpoints
     {
         if(!BpGetCount(BPEXCEPTION))
         {
             dputs(QT_TRANSLATE_NOOP("DBG", "No exception breakpoints to disable!"));
             return true;
         }
-        if(!BpEnumAll(cbDisableAllExceptionBreakpoints))  //at least one deletion failed
+        if(!BpEnumAll(cbDisableAllExceptionBreakpoints)) //at least one deletion failed
             return false;
         dputs(QT_TRANSLATE_NOOP("DBG", "All exception breakpoints disabled!"));
         GuiUpdateAllViews();
         return true;
     }
     BREAKPOINT found;
-    if(BpGet(0, BPEXCEPTION, argv[1], &found))  //found a breakpoint with name
+    if(BpGet(0, BPEXCEPTION, argv[1], &found)) //found a breakpoint with name
     {
         if(!BpEnable(found.addr, BPEXCEPTION, false))
         {
@@ -1290,7 +1312,7 @@ bool cbDebugDisableExceptionBPX(int argc, char* argv[])
         return true;
     }
     duint addr = 0;
-    if((!ExceptionNameToCode(argv[1], reinterpret_cast<unsigned int*>(&addr)) && !valfromstring(argv[1], &addr)) || !BpGet(addr, BPEXCEPTION, 0, &found))  //invalid breakpoint
+    if((!ExceptionNameToCode(argv[1], reinterpret_cast<unsigned int*>(&addr)) && !valfromstring(argv[1], &addr)) || !BpGet(addr, BPEXCEPTION, 0, &found)) //invalid breakpoint
     {
         dprintf(QT_TRANSLATE_NOOP("DBG", "No such exception breakpoint \"%s\"\n"), argv[1]);
         return false;
@@ -1321,7 +1343,7 @@ bool cbDebugSetBPGoto(int argc, char* argv[])
     _snprintf(cmd, sizeof(cmd), "SetBreakpointCondition %s, 0", argv[1]);
     if(!cmddirectexec(cmd))
         return false;
-    _snprintf(cmd, sizeof(cmd), "SetBreakpointCommand %s, \"CIP=%s\"", argv[1], argv[2]);
+    _snprintf(cmd, sizeof(cmd), "SetBreakpointCommand %s, \"bpgoto(%s)\"", argv[1], argv[2]);
     if(!cmddirectexec(cmd))
         return false;
     _snprintf(cmd, sizeof(cmd), "SetBreakpointCommandCondition %s, 1", argv[1]);

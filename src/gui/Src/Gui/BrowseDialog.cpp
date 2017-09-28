@@ -1,6 +1,7 @@
 #include "BrowseDialog.h"
 #include "ui_BrowseDialog.h"
 #include <QFileDialog>
+#include <Configuration.h>
 
 BrowseDialog::BrowseDialog(QWidget* parent, const QString & title, const QString & text, const QString & filter, const QString & defaultPath, bool save) :
     QDialog(parent),
@@ -10,11 +11,13 @@ BrowseDialog::BrowseDialog(QWidget* parent, const QString & title, const QString
     setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint | Qt::MSWindowsFixedSizeDialogHint);
     setWindowTitle(title);
     ui->label->setText(text);
-    ui->lineEdit->setText(defaultPath);
+    ui->lineEdit->setText(QDir::toNativeSeparators(defaultPath));
+    Config()->setupWindowPos(this);
 }
 
 BrowseDialog::~BrowseDialog()
 {
+    Config()->saveWindowPos(this);
     delete ui;
 }
 
