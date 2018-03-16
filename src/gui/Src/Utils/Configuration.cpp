@@ -245,6 +245,8 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     //bool settings
     QMap<QString, bool> disassemblyBool;
     disassemblyBool.insert("ArgumentSpaces", false);
+    disassemblyBool.insert("HidePointerSizes", false);
+    disassemblyBool.insert("HideNormalSegments", false);
     disassemblyBool.insert("MemorySpaces", false);
     disassemblyBool.insert("KeepSize", false);
     disassemblyBool.insert("FillNOPs", false);
@@ -273,6 +275,7 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     guiBool.insert("LoadSaveTabOrder", false);
     guiBool.insert("ShowGraphRva", false);
     guiBool.insert("ShowExitConfirmation", true);
+    guiBool.insert("DisableAutoComplete", false);
     //Named menu settings
     insertMenuBuilderBools(&guiBool, "CPUDisassembly", 50); //CPUDisassembly
     insertMenuBuilderBools(&guiBool, "CPUDump", 50); //CPUDump
@@ -350,6 +353,7 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     tabOrderUint.insert("ThreadsTab", curTab++);
     tabOrderUint.insert("SnowmanTab", curTab++);
     tabOrderUint.insert("HandlesTab", curTab++);
+    tabOrderUint.insert("TraceTab", curTab++);
     defaultUints.insert("TabOrder", tabOrderUint);
 
     //font settings
@@ -381,6 +385,7 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     defaultShortcuts.insert("ViewSEHChain", Shortcut({tr("View"), tr("SEH")}, "", true));
     defaultShortcuts.insert("ViewScript", Shortcut({tr("View"), tr("Script")}, "Alt+S", true));
     defaultShortcuts.insert("ViewSymbolInfo", Shortcut({tr("View"), tr("Symbol Info")}, "Ctrl+Alt+S", true));
+    defaultShortcuts.insert("ViewModules", Shortcut({tr("View"), tr("Modules")}, "Alt+E", true));
     defaultShortcuts.insert("ViewSource", Shortcut({tr("View"), tr("Source")}, "Ctrl+Shift+S", true));
     defaultShortcuts.insert("ViewReferences", Shortcut({tr("View"), tr("References")}, "Alt+R", true));
     defaultShortcuts.insert("ViewThreads", Shortcut({tr("View"), tr("Threads")}, "Alt+T", true));
@@ -393,8 +398,10 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     defaultShortcuts.insert("ViewSnowman", Shortcut({tr("View"), tr("Snowman")}, "", true));
     defaultShortcuts.insert("ViewHandles", Shortcut({tr("View"), tr("Handles")}, "", true));
     defaultShortcuts.insert("ViewGraph", Shortcut({tr("View"), tr("Graph")}, "Alt+G", true));
-    defaultShortcuts.insert("ViewPreviousTab", Shortcut({tr("View"), tr("Previous Tab")}, "Ctrl+Shift+Tab"));
-    defaultShortcuts.insert("ViewNextTab", Shortcut({tr("View"), tr("Next Tab")}, "Ctrl+Tab"));
+    defaultShortcuts.insert("ViewPreviousTab", Shortcut({tr("View"), tr("Previous Tab")}, "Alt+Left"));
+    defaultShortcuts.insert("ViewNextTab", Shortcut({tr("View"), tr("Next Tab")}, "Alt+Right"));
+    defaultShortcuts.insert("ViewPreviousHistory", Shortcut({tr("View"), tr("Previous View")}, "Ctrl+Shift+Tab"));
+    defaultShortcuts.insert("ViewNextHistory", Shortcut({tr("View"), tr("Next View")}, "Ctrl+Tab"));
     defaultShortcuts.insert("ViewHideTab", Shortcut({tr("View"), tr("Hide Tab")}, "Ctrl+W"));
 
     defaultShortcuts.insert("DebugRun", Shortcut({tr("Debug"), tr("Run")}, "F9", true));
@@ -487,6 +494,8 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     defaultShortcuts.insert("ActionGotoFileOffset", Shortcut({tr("Actions"), tr("Goto File Offset")}, "Ctrl+Shift+G"));
     defaultShortcuts.insert("ActionFindReferencesToSelectedAddress", Shortcut({tr("Actions"), tr("Find References to Selected Address")}, "Ctrl+R"));
     defaultShortcuts.insert("ActionFindPattern", Shortcut({tr("Actions"), tr("Find Pattern")}, "Ctrl+B"));
+    defaultShortcuts.insert("ActionFindPatternInModule", Shortcut({tr("Actions"), tr("Find Pattern in Current Module")}, "Ctrl+Shift+B"));
+    defaultShortcuts.insert("ActionFindNamesInModule", Shortcut({tr("Actions"), tr("Find Names in Current Module")}, "Ctrl+N"));
     defaultShortcuts.insert("ActionFindReferences", Shortcut({tr("Actions"), tr("Find References")}, "Ctrl+R"));
     defaultShortcuts.insert("ActionXrefs", Shortcut({tr("Actions"), tr("xrefs...")}, "X"));
     defaultShortcuts.insert("ActionAnalyzeSingleFunction", Shortcut({tr("Actions"), tr("Analyze Single Function")}, "A"));
@@ -496,6 +505,7 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     defaultShortcuts.insert("ActionHighlightingMode", Shortcut({tr("Actions"), tr("Highlighting Mode")}, "H"));
     defaultShortcuts.insert("ActionToggleDestinationPreview", Shortcut({tr("Actions"), tr("Enable/Disable Branch Destination Preview")}, "P"));
     defaultShortcuts.insert("ActionFind", Shortcut({tr("Actions"), tr("Find")}, "Ctrl+F"));
+    defaultShortcuts.insert("ActionFindInModule", Shortcut({tr("Actions"), tr("Find in Current Module")}, "Ctrl+Shift+F"));
     defaultShortcuts.insert("ActionDecompileFunction", Shortcut({tr("Actions"), tr("Decompile Function")}, "F5"));
     defaultShortcuts.insert("ActionDecompileSelection", Shortcut({tr("Actions"), tr("Decompile Selection")}, "Shift+F5"));
     defaultShortcuts.insert("ActionEditBreakpoint", Shortcut({tr("Actions"), tr("Edit breakpoint")}, ""));
@@ -598,13 +608,26 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     defaultShortcuts.insert("ActionWatchDwordQword", Shortcut({tr("Actions"), tr("Watch DWORD/QWORD")}));
     defaultShortcuts.insert("ActionDataCopy", Shortcut({tr("Actions"), tr("Data Copy")}));
     defaultShortcuts.insert("ActionCopyFileOffset", Shortcut({tr("Actions"), tr("Copy File Offset")}));
+    defaultShortcuts.insert("ActionToggleRunTrace", Shortcut({tr("Actions"), tr("Start or Stop Run Trace")}));
 
     Shortcuts = defaultShortcuts;
 
     load();
+
+    //because we changed the default this needs special handling for old configurations
+    if(Shortcuts["ViewPreviousTab"].Hotkey.toString() == Shortcuts["ViewPreviousHistory"].Hotkey.toString())
+    {
+        Shortcuts["ViewPreviousTab"].Hotkey = defaultShortcuts["ViewPreviousTab"].Hotkey;
+        save();
+    }
+    if(Shortcuts["ViewNextTab"].Hotkey.toString() == Shortcuts["ViewNextHistory"].Hotkey.toString())
+    {
+        Shortcuts["ViewNextTab"].Hotkey = defaultShortcuts["ViewNextTab"].Hotkey;
+        save();
+    }
 }
 
-Configuration* Config()
+Configuration* Configuration::instance()
 {
     return mPtr;
 }
@@ -647,16 +670,6 @@ void Configuration::writeColors()
         colorToConfig(id, Colors[id]);
     }
     emit colorsUpdated();
-}
-
-void Configuration::emitColorsUpdated()
-{
-    emit colorsUpdated();
-}
-
-void Configuration::emitTokenizerConfigUpdated()
-{
-    emit tokenizerConfigUpdated();
 }
 
 void Configuration::readBools()
@@ -754,11 +767,6 @@ void Configuration::writeFonts()
     emit fontsUpdated();
 }
 
-void Configuration::emitFontsUpdated()
-{
-    emit fontsUpdated();
-}
-
 void Configuration::readShortcuts()
 {
     Shortcuts = defaultShortcuts;
@@ -792,11 +800,6 @@ void Configuration::writeShortcuts()
         shortcutToConfig(it.key(), it.value().Hotkey);
         it++;
     }
-    emit shortcutsUpdated();
-}
-
-void Configuration::emitShortcutsUpdated()
-{
     emit shortcutsUpdated();
 }
 

@@ -52,6 +52,7 @@
 #include "MRUList.h"
 #include "AboutDialog.h"
 #include "UpdateChecker.h"
+#include "Tracer/TraceBrowser.h"
 
 QString MainWindow::windowTitle = "";
 
@@ -204,7 +205,12 @@ MainWindow::MainWindow(QWidget* parent)
     mGraphView->setWindowTitle(tr("Graph"));
     mGraphView->setWindowIcon(DIcon("graph.png"));
 
-    // Create the tab widget and enable detaching and hiding
+    // Trace view
+    mTraceBrowser = new TraceBrowser(this);
+    mTraceBrowser->setWindowTitle(tr("Trace"));
+    mTraceBrowser->setWindowIcon(DIcon("trace.png"));
+    connect(mTraceBrowser, SIGNAL(displayReferencesWidget()), this, SLOT(displayReferencesWidget()));
+
     mTabWidget = new MHTabWidget(this, true, true);
 
     // Add all widgets to the list
@@ -223,6 +229,7 @@ MainWindow::MainWindow(QWidget* parent)
     mWidgetList.push_back(WidgetInfo(mThreadView, "ThreadsTab"));
     mWidgetList.push_back(WidgetInfo(mSnowmanView, "SnowmanTab"));
     mWidgetList.push_back(WidgetInfo(mHandlesView, "HandlesTab"));
+    mWidgetList.push_back(WidgetInfo(mTraceBrowser, "TraceTab"));
 
     // If LoadSaveTabOrder disabled, load tabs in default order
     if(!ConfigBool("Gui", "LoadSaveTabOrder"))
@@ -279,6 +286,7 @@ MainWindow::MainWindow(QWidget* parent)
     makeCommandAction(ui->actionHideDebugger, "hide");
     connect(ui->actionCpu, SIGNAL(triggered()), this, SLOT(displayCpuWidget()));
     connect(ui->actionSymbolInfo, SIGNAL(triggered()), this, SLOT(displaySymbolWidget()));
+    connect(ui->actionModules, SIGNAL(triggered()), this, SLOT(displaySymbolWidget()));
     connect(ui->actionSource, SIGNAL(triggered()), this, SLOT(displaySourceViewWidget()));
     connect(mSymbolView, SIGNAL(showReferences()), this, SLOT(displayReferencesWidget()));
     connect(ui->actionReferences, SIGNAL(triggered()), this, SLOT(displayReferencesWidget()));
@@ -297,6 +305,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(ui->actionFunctions, SIGNAL(triggered()), this, SLOT(displayFunctions()));
     connect(ui->actionCallStack, SIGNAL(triggered()), this, SLOT(displayCallstack()));
     connect(ui->actionSEHChain, SIGNAL(triggered()), this, SLOT(displaySEHChain()));
+    connect(ui->actionTrace, SIGNAL(triggered()), this, SLOT(displayRunTrace()));
     connect(ui->actionDonate, SIGNAL(triggered()), this, SLOT(donate()));
     connect(ui->actionReportBug, SIGNAL(triggered()), this, SLOT(reportBug()));
     connect(ui->actionBlog, SIGNAL(triggered()), this, SLOT(blog()));
@@ -311,6 +320,8 @@ MainWindow::MainWindow(QWidget* parent)
     connect(ui->actionGraph, SIGNAL(triggered()), this, SLOT(displayGraphWidget()));
     connect(ui->actionPreviousTab, SIGNAL(triggered()), this, SLOT(displayPreviousTab()));
     connect(ui->actionNextTab, SIGNAL(triggered()), this, SLOT(displayNextTab()));
+    connect(ui->actionPreviousView, SIGNAL(triggered()), this, SLOT(displayPreviousView()));
+    connect(ui->actionNextView, SIGNAL(triggered()), this, SLOT(displayNextView()));
     connect(ui->actionHideTab, SIGNAL(triggered()), this, SLOT(hideTab()));
     makeCommandAction(ui->actionStepIntoSource, "TraceIntoConditional src.line(cip) && !src.disp(cip)");
     makeCommandAction(ui->actionStepOverSource, "TraceOverConditional src.line(cip) && !src.disp(cip)");
@@ -330,6 +341,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(mCpuWidget->getDisasmWidget(), SIGNAL(displaySnowmanWidget()), this, SLOT(displaySnowmanWidget()));
     connect(mCpuWidget->getDisasmWidget(), SIGNAL(displayLogWidget()), this, SLOT(displayLogWidget()));
     connect(mCpuWidget->getDisasmWidget(), SIGNAL(displayGraphWidget()), this, SLOT(displayGraphWidget()));
+    connect(mCpuWidget->getDisasmWidget(), SIGNAL(displaySymbolsWidget()), this, SLOT(displaySymbolWidget()));
     connect(mCpuWidget->getDisasmWidget(), SIGNAL(showPatches()), this, SLOT(patchWindow()));
 
     connect(mGraphView, SIGNAL(displaySnowmanWidget()), this, SLOT(displaySnowmanWidget()));
@@ -528,6 +540,8 @@ void MainWindow::setTab(QWidget* widget)
             return;
         }
     }
+
+    //TODO: restore configuration index
 }
 
 void MainWindow::loadTabDefaultOrder()
@@ -596,7 +610,9 @@ void MainWindow::saveWindowSettings()
     for(int i = 0; i < mWidgetList.size(); i++)
     {
         bool isDetached = detachedTabWindows.contains(mWidgetList[i].widget);
+        bool isDeleted = !isDetached && mTabWidget->indexOf(mWidgetList[i].widget) == -1;
         BridgeSettingSetUint("Detached Windows", mWidgetList[i].nativeName.toUtf8().constData(), isDetached);
+        BridgeSettingSetUint("Deleted Tabs", mWidgetList[i].nativeName.toUtf8().constData(), isDeleted);
         if(isDetached)
             BridgeSettingSet("Tab Window Settings", mWidgetList[i].nativeName.toUtf8().constData(),
                              mWidgetList[i].widget->parentWidget()->saveGeometry().toBase64().data());
@@ -637,6 +653,15 @@ void MainWindow::loadWindowSettings()
         }
     }
 
+    // 'Restore' deleted tabs
+    for(int i = 0; i < mWidgetList.size(); i++)
+    {
+        duint isDeleted = 0;
+        BridgeSettingGetUint("Deleted Tabs", mWidgetList[i].nativeName.toUtf8().constData(), &isDeleted);
+        if(isDeleted)
+            mTabWidget->DeleteTab(mTabWidget->indexOf(mWidgetList[i].widget));
+    }
+
     mCpuWidget->loadWindowSettings();
     mSymbolView->loadWindowSettings();
 }
@@ -665,6 +690,7 @@ void MainWindow::refreshShortcuts()
     setGlobalShortcut(ui->actionSEHChain, ConfigShortcut("ViewSEHChain"));
     setGlobalShortcut(ui->actionScript, ConfigShortcut("ViewScript"));
     setGlobalShortcut(ui->actionSymbolInfo, ConfigShortcut("ViewSymbolInfo"));
+    setGlobalShortcut(ui->actionModules, ConfigShortcut("ViewModules"));
     setGlobalShortcut(ui->actionSource, ConfigShortcut("ViewSource"));
     setGlobalShortcut(ui->actionReferences, ConfigShortcut("ViewReferences"));
     setGlobalShortcut(ui->actionThreads, ConfigShortcut("ViewThreads"));
@@ -679,6 +705,8 @@ void MainWindow::refreshShortcuts()
     setGlobalShortcut(ui->actionGraph, ConfigShortcut("ViewGraph"));
     setGlobalShortcut(ui->actionPreviousTab, ConfigShortcut("ViewPreviousTab"));
     setGlobalShortcut(ui->actionNextTab, ConfigShortcut("ViewNextTab"));
+    setGlobalShortcut(ui->actionPreviousView, ConfigShortcut("ViewPreviousHistory"));
+    setGlobalShortcut(ui->actionNextView, ConfigShortcut("ViewNextHistory"));
     setGlobalShortcut(ui->actionHideTab, ConfigShortcut("ViewHideTab"));
 
     setGlobalShortcut(ui->actionRun, ConfigShortcut("DebugRun"));
@@ -893,6 +921,17 @@ void MainWindow::dropEvent(QDropEvent* pEvent)
     }
 }
 
+bool MainWindow::event(QEvent* event)
+{
+    // just make sure mTabWidget take current view as the latest
+    if(event->type() == QEvent::WindowActivate && this->isActiveWindow())
+    {
+        mTabWidget->setCurrentIndex(mTabWidget->currentIndex());
+    }
+
+    return QMainWindow::event(event);
+}
+
 void MainWindow::updateWindowTitleSlot(QString filename)
 {
     if(filename.length())
@@ -950,6 +989,16 @@ void MainWindow::displayPreviousTab()
 void MainWindow::displayNextTab()
 {
     mTabWidget->showNextTab();
+}
+
+void MainWindow::displayPreviousView()
+{
+    mTabWidget->showPreviousView();
+}
+
+void MainWindow::displayNextView()
+{
+    mTabWidget->showNextView();
 }
 
 void MainWindow::hideTab()
@@ -1430,6 +1479,11 @@ void MainWindow::displayCallstack()
 void MainWindow::displaySEHChain()
 {
     showQWidgetTab(mSEHChainView);
+}
+
+void MainWindow::displayRunTrace()
+{
+    showQWidgetTab(mTraceBrowser);
 }
 
 void MainWindow::donate()
@@ -1994,10 +2048,10 @@ void MainWindow::on_actionImportSettings_triggered()
             }
             Config()->load();
             DbgSettingsUpdated();
-            Config()->emitColorsUpdated();
-            Config()->emitFontsUpdated();
-            Config()->emitShortcutsUpdated();
-            Config()->emitTokenizerConfigUpdated();
+            emit Config()->colorsUpdated();
+            emit Config()->fontsUpdated();
+            emit Config()->shortcutsUpdated();
+            emit Config()->tokenizerConfigUpdated();
             GuiUpdateAllViews();
         }
     }
@@ -2065,7 +2119,7 @@ void MainWindow::onMenuCustomized()
         QMenu* currentMenu = menus[i];
         QMenu* moreCommands = nullptr;
         bool moreCommandsUsed = false;
-        QList<QAction*> & list = currentMenu->actions();
+        QList<QAction*> list = currentMenu->actions();
         moreCommands = list.last()->menu();
         if(moreCommands && moreCommands->title().compare(tr("More Commands")) == 0)
         {

@@ -29,6 +29,8 @@
 #include "thread.h"
 #include "comment.h"
 #include "exception.h"
+#include "database.h"
+#include "dbghelp_safe.h"
 
 static DBGFUNCTIONS _dbgfunctions;
 
@@ -101,7 +103,8 @@ static bool _patchrestore(duint addr)
 
 static void _getcallstack(DBGCALLSTACK* callstack)
 {
-    stackgetcallstack(GetContextDataEx(hActiveThread, UE_CSP), (CALLSTACK*)callstack);
+    if(hActiveThread)
+        stackgetcallstack(GetContextDataEx(hActiveThread, UE_CSP), (CALLSTACK*)callstack);
 }
 
 static void _getsehchain(DBGSEHCHAIN* sehchain)
@@ -135,7 +138,7 @@ static bool _getcmdline(char* cmd_line, size_t* cbsize)
     if(!cmd_line && cbsize)
         *cbsize = strlen(cmdline) + sizeof(char);
     else if(cmd_line)
-        strcpy(cmd_line, cmdline);
+        memcpy(cmd_line, cmdline, strlen(cmdline) + 1);
     efree(cmdline, "_getcmdline:cmdline");
     return true;
 }
@@ -369,6 +372,41 @@ static bool _modrelocationsinrange(duint addr, duint size, ListOf(DBGRELOCATIONI
     return true;
 }
 
+typedef struct _SYMAUTOCOMPLETECALLBACKPARAM
+{
+    char** Buffer;
+    int* count;
+    int MaxSymbols;
+} SYMAUTOCOMPLETECALLBACKPARAM;
+
+static BOOL CALLBACK SymAutoCompleteCallback(PSYMBOL_INFO pSymInfo, ULONG SymbolSize, PVOID UserContext)
+{
+    SYMAUTOCOMPLETECALLBACKPARAM* param = reinterpret_cast<SYMAUTOCOMPLETECALLBACKPARAM*>(UserContext);
+    if(param->Buffer)
+    {
+        param->Buffer[*param->count] = (char*)BridgeAlloc(pSymInfo->NameLen + 1);
+        memcpy(param->Buffer[*param->count], pSymInfo->Name, pSymInfo->NameLen + 1);
+        param->Buffer[*param->count][pSymInfo->NameLen] = 0;
+    }
+    if(++*param->count >= param->MaxSymbols)
+        return FALSE;
+    else
+        return TRUE;
+}
+
+static int SymAutoComplete(const char* Search, char** Buffer, int MaxSymbols)
+{
+    //debug
+    int count = 0;
+    SYMAUTOCOMPLETECALLBACKPARAM param;
+    param.Buffer = Buffer;
+    param.count = &count;
+    param.MaxSymbols = MaxSymbols;
+    if(!SafeSymEnumSymbols(fdProcessInfo->hProcess, 0, Search, SymAutoCompleteCallback, &param))
+        dputs(QT_TRANSLATE_NOOP("DBG", "SymEnumSymbols failed!"));
+    return count;
+}
+
 void dbgfunctionsinit()
 {
     _dbgfunctions.AssembleAtEx = _assembleatex;
@@ -439,4 +477,6 @@ void dbgfunctionsinit()
     _dbgfunctions.ModRelocationsFromAddr = _modrelocationsfromaddr;
     _dbgfunctions.ModRelocationAtAddr = (MODRELOCATIONATADDR)ModRelocationAtAddr;
     _dbgfunctions.ModRelocationsInRange = _modrelocationsinrange;
+    _dbgfunctions.DbGetHash = DbGetHash;
+    _dbgfunctions.SymAutoComplete = SymAutoComplete;
 }

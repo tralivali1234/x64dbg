@@ -4,6 +4,7 @@
 #include <QDesktopServices>
 #include <QClipboard>
 #include "CPUDisassembly.h"
+#include "main.h"
 #include "CPUSideBar.h"
 #include "CPUWidget.h"
 #include "EncodeMap.h"
@@ -26,6 +27,7 @@
 #include "SnowmanView.h"
 #include "MemoryPage.h"
 #include "BreakpointMenu.h"
+#include "BrowseDialog.h"
 
 CPUDisassembly::CPUDisassembly(CPUWidget* parent) : Disassembly(parent)
 {
@@ -167,14 +169,14 @@ void CPUDisassembly::setupFollowReferenceMenu(dsint wVA, QMenu* menu, bool isRef
                 if(arg.segment == SEG_FS)
                     segment = "fs:";
 #endif //_WIN64
-                if(DbgMemIsValidReadPtr(arg.value))
-                    addFollowReferenceMenuItem(tr("&Address: ") + segment + QString(arg.mnemonic).toUpper().trimmed(), arg.value, menu, isReferences, isFollowInCPU);
                 if(arg.value != arg.constant)
                 {
-                    QString constant = ToHexString(arg.constant);
-                    if(DbgMemIsValidReadPtr(arg.constant))
-                        addFollowReferenceMenuItem(tr("&Constant: ") + constant, arg.constant, menu, isReferences, isFollowInCPU);
+                    if(DbgMemIsValidReadPtr(arg.value))
+                        addFollowReferenceMenuItem(tr("&Address: ") + segment + QString(arg.mnemonic).toUpper().trimmed(), arg.value, menu, isReferences, isFollowInCPU);
                 }
+                QString constant = ToHexString(arg.constant);
+                if(DbgMemIsValidReadPtr(arg.constant))
+                    addFollowReferenceMenuItem(tr("&Constant: ") + constant, arg.constant, menu, isReferences, isFollowInCPU);
                 if(DbgMemIsValidReadPtr(arg.memvalue))
                 {
                     addFollowReferenceMenuItem(tr("&Value: ") + segment + "[" + QString(arg.mnemonic) + "]", arg.memvalue, menu, isReferences, isFollowInCPU);
@@ -201,7 +203,7 @@ void CPUDisassembly::setupFollowReferenceMenu(dsint wVA, QMenu* menu, bool isRef
             else //arg_normal
             {
                 if(DbgMemIsValidReadPtr(arg.value))
-                    addFollowReferenceMenuItem(QString(arg.mnemonic).toUpper().trimmed(), arg.value, menu, isReferences, isFollowInCPU);
+                    addFollowReferenceMenuItem(QString(arg.mnemonic).trimmed(), arg.value, menu, isReferences, isFollowInCPU);
             }
         }
     }
@@ -257,8 +259,14 @@ void CPUDisassembly::setupRightClickContextMenu()
     binaryMenu->addAction(makeShortcutAction(DIcon("binary_fill_nop.png"), tr("Fill with &NOPs"), SLOT(binaryFillNopsSlot()), "ActionBinaryFillNops"));
     binaryMenu->addSeparator();
     binaryMenu->addAction(makeShortcutAction(DIcon("binary_copy.png"), tr("&Copy"), SLOT(binaryCopySlot()), "ActionBinaryCopy"));
-    binaryMenu->addAction(makeShortcutAction(DIcon("binary_paste.png"), tr("&Paste"), SLOT(binaryPasteSlot()), "ActionBinaryPaste"));
-    binaryMenu->addAction(makeShortcutAction(DIcon("binary_paste_ignoresize.png"), tr("Paste (&Ignore Size)"), SLOT(binaryPasteIgnoreSizeSlot()), "ActionBinaryPasteIgnoreSize"));
+    binaryMenu->addAction(makeShortcutAction(DIcon("binary_paste.png"), tr("&Paste"), SLOT(binaryPasteSlot()), "ActionBinaryPaste"), [](QMenu*)
+    {
+        return QApplication::clipboard()->mimeData()->hasText();
+    });
+    binaryMenu->addAction(makeShortcutAction(DIcon("binary_paste_ignoresize.png"), tr("Paste (&Ignore Size)"), SLOT(binaryPasteIgnoreSizeSlot()), "ActionBinaryPasteIgnoreSize"), [](QMenu*)
+    {
+        return QApplication::clipboard()->mimeData()->hasText();
+    });
     mMenuBuilder->addMenu(makeMenu(DIcon("binary.png"), tr("&Binary")), binaryMenu);
 
     MenuBuilder* copyMenu = new MenuBuilder(this);
@@ -350,7 +358,7 @@ void CPUDisassembly::setupRightClickContextMenu()
     mMenuBuilder->addAction(togglePreview, [this, togglePreview](QMenu*)
     {
         togglePreview->setText(mPopupEnabled ? tr("Disable Branch Destination Preview") : tr("Enable Branch Destination Preview"));
-        return true;
+        return false; //hide this menu from the user, but keep the shortcut working
     });
 
     MenuBuilder* labelMenu = new MenuBuilder(this);
@@ -382,6 +390,7 @@ void CPUDisassembly::setupRightClickContextMenu()
     QAction* traceRecordEnableBit = makeAction(DIcon("bit.png"), tr("Bit"), SLOT(ActionTraceRecordBitSlot()));
     QAction* traceRecordEnableByte = makeAction(DIcon("byte.png"), tr("Byte"), SLOT(ActionTraceRecordByteSlot()));
     QAction* traceRecordEnableWord = makeAction(DIcon("word.png"), tr("Word"), SLOT(ActionTraceRecordWordSlot()));
+    QAction* traceRecordToggleRunTrace = makeShortcutAction(tr("Start Run Trace"), SLOT(ActionTraceRecordToggleRunTraceSlot()), "ActionToggleRunTrace");
     mMenuBuilder->addMenu(makeMenu(DIcon("trace.png"), tr("Trace record")), [ = ](QMenu * menu)
     {
         if(DbgFunctions()->GetTraceRecordType(rvaToVa(getInitialSelection())) == TRACERECORDTYPE::TraceRecordNone)
@@ -392,6 +401,12 @@ void CPUDisassembly::setupRightClickContextMenu()
         }
         else
             menu->addAction(traceRecordDisable);
+        menu->addSeparator();
+        if(DbgValFromString("tr.runtraceenabled()") == 1)
+            traceRecordToggleRunTrace->setText(tr("Stop Run Trace"));
+        else
+            traceRecordToggleRunTrace->setText(tr("Start Run Trace"));
+        menu->addAction(traceRecordToggleRunTrace);
         return true;
     });
 
@@ -489,11 +504,10 @@ void CPUDisassembly::setupRightClickContextMenu()
     mMenuBuilder->addMenu(makeMenu(DIcon("analysis.png"), tr("Analysis")), analysisMenu);
     mMenuBuilder->addAction(makeShortcutAction(DIcon("pdb.png"), tr("Download Symbols for This Module"), SLOT(downloadCurrentSymbolsSlot()), "ActionDownloadSymbol"), [this](QMenu*)
     {
-        char module[MAX_MODULE_SIZE] = "";
-        return DbgGetModuleAt(rvaToVa(getInitialSelection()), module);
+        //only show this action in system modules (generally user modules don't have downloadable symbols)
+        return DbgFunctions()->ModGetParty(rvaToVa(getInitialSelection())) == 1;
     });
     mMenuBuilder->addSeparator();
-
 
     mMenuBuilder->addAction(makeShortcutAction(DIcon("compile.png"), tr("Assemble"), SLOT(assembleSlot()), "ActionAssemble"));
     removeAction(mMenuBuilder->addAction(makeShortcutAction(DIcon("patch.png"), tr("Patches"), SLOT(showPatchesSlot()), "ViewPatches"))); //prevent conflicting shortcut with the MainWindow
@@ -573,18 +587,20 @@ void CPUDisassembly::setupRightClickContextMenu()
     mSearchRegionMenu->addAction(mFindGUIDRegion);
 
     // Search in Current Module menu
-    mFindCommandModule = makeAction(DIcon("search_for_command.png"), tr("C&ommand"), SLOT(findCommandSlot()));
+    mFindCommandModule = makeShortcutAction(DIcon("search_for_command.png"), tr("C&ommand"), SLOT(findCommandSlot()), "ActionFindInModule");
     mFindConstantModule = makeAction(DIcon("search_for_constant.png"), tr("&Constant"), SLOT(findConstantSlot()));
     mFindStringsModule = makeAction(DIcon("search_for_string.png"), tr("&String references"), SLOT(findStringsSlot()));
     mFindCallsModule = makeAction(DIcon("call.png"), tr("&Intermodular calls"), SLOT(findCallsSlot()));
-    mFindPatternModule = makeAction(DIcon("search_for_pattern.png"), tr("&Pattern"), SLOT(findPatternSlot()));
+    mFindPatternModule = makeShortcutAction(DIcon("search_for_pattern.png"), tr("&Pattern"), SLOT(findPatternSlot()), "ActionFindPatternInModule");
     mFindGUIDModule = makeAction(DIcon("guid.png"), tr("&GUID"), SLOT(findGUIDSlot()));
+    mFindNamesModule = makeShortcutAction(DIcon("names.png"), tr("&Names"), SLOT(findNamesSlot()), "ActionFindNamesInModule");
     mSearchModuleMenu->addAction(mFindCommandModule);
     mSearchModuleMenu->addAction(mFindConstantModule);
     mSearchModuleMenu->addAction(mFindStringsModule);
     mSearchModuleMenu->addAction(mFindCallsModule);
     mSearchModuleMenu->addAction(mFindPatternModule);
     mSearchModuleMenu->addAction(mFindGUIDModule);
+    mSearchModuleMenu->addAction(mFindNamesModule);
 
     // Search in Current Function menu
     mFindCommandFunction = makeAction(DIcon("search_for_command.png"), tr("C&ommand"), SLOT(findCommandSlot()));
@@ -966,6 +982,7 @@ void CPUDisassembly::gotoExpressionSlot()
         return;
     if(!mGoto)
         mGoto = new GotoDialog(this);
+    mGoto->setInitialExpression(ToPtrString(rvaToVa(getInitialSelection())));
     if(mGoto->exec() == QDialog::Accepted)
     {
         duint value = DbgValFromString(mGoto->expressionText.toUtf8().constData());
@@ -988,6 +1005,17 @@ void CPUDisassembly::gotoFileOffsetSlot()
     mGotoOffset->fileOffset = true;
     mGotoOffset->modName = QString(modname);
     mGotoOffset->setWindowTitle(tr("Goto File Offset in ") + QString(modname));
+    QString offsetOfSelected;
+    prepareDataRange(getSelectionStart(), getSelectionEnd(), [&](int, const Instruction_t & inst)
+    {
+        duint addr = rvaToVa(inst.rva);
+        duint offset = DbgFunctions()->VaToFileOffset(addr);
+        if(offset)
+            offsetOfSelected = ToHexString(offset);
+        return false;
+    });
+    if(!offsetOfSelected.isEmpty())
+        mGotoOffset->setInitialExpression(offsetOfSelected);
     if(mGotoOffset->exec() != QDialog::Accepted)
         return;
     duint value = DbgValFromString(mGotoOffset->expressionText.toUtf8().constData());
@@ -1167,7 +1195,7 @@ void CPUDisassembly::findCallsSlot()
     {
         duint start, end;
         if(DbgFunctionGet(rvaToVa(getInitialSelection()), &start, &end))
-            DbgCmdExec(QString("modcallfind %1, %2, 0").arg(addrText).arg(ToPtrString(start)).arg(ToPtrString(end - start)).toUtf8().constData());
+            DbgCmdExec(QString("modcallfind %1, %2, 0").arg(ToPtrString(start)).arg(ToPtrString(end - start)).toUtf8().constData());
     }
     emit displayReferencesWidget();
 }
@@ -1231,6 +1259,18 @@ void CPUDisassembly::findGUIDSlot()
             DbgCmdExec(QString("findguid %1, %2, 0").arg(ToPtrString(start)).arg(ToPtrString(end - start)).toUtf8().constData());
     }
     emit displayReferencesWidget();
+}
+
+void CPUDisassembly::findNamesSlot()
+{
+    if(sender() == mFindNamesModule)
+    {
+        auto base = DbgFunctions()->ModBaseFromAddr(rvaToVa(getInitialSelection()));
+        if(!base)
+            return;
+        Bridge::getBridge()->symbolSelectModule(base);
+        emit displaySymbolsWidget();
+    }
 }
 
 void CPUDisassembly::selectionGetSlot(SELECTIONDATA* selection)
@@ -1353,6 +1393,8 @@ void CPUDisassembly::binaryCopySlot()
 
 void CPUDisassembly::binaryPasteSlot()
 {
+    if(!QApplication::clipboard()->mimeData()->hasText())
+        return;
     HexEditDialog hexEdit(this);
     dsint selStart = getSelectionStart();
     dsint selSize = getSelectionEnd() - selStart + 1;
@@ -1380,6 +1422,8 @@ void CPUDisassembly::undoSelectionSlot()
 
 void CPUDisassembly::binaryPasteIgnoreSizeSlot()
 {
+    if(!QApplication::clipboard()->mimeData()->hasText())
+        return;
     HexEditDialog hexEdit(this);
     dsint selStart = getSelectionStart();
     dsint selSize = getSelectionEnd() - selStart + 1;
@@ -1452,11 +1496,14 @@ void CPUDisassembly::pushSelectionInto(bool copyBytes, QTextStream & stream, QTe
         duint cur_addr = rvaToVa(inst.rva);
         QString address = getAddrText(cur_addr, 0, addressLen > sizeof(duint) * 2 + 1);
         QString bytes;
-        for(int j = 0; j < inst.dump.size(); j++)
+        if(copyBytes)
         {
-            if(j)
-                bytes += " ";
-            bytes += ToByteString((unsigned char)(inst.dump.at(j)));
+            for(int j = 0; j < inst.dump.size(); j++)
+            {
+                if(j)
+                    bytes += " ";
+                bytes += ToByteString((unsigned char)(inst.dump.at(j)));
+            }
         }
         QString disassembly;
         QString htmlDisassembly;
@@ -1862,14 +1909,12 @@ void CPUDisassembly::mnemonicBriefSlot()
 
 void CPUDisassembly::mnemonicHelpSlot()
 {
-    BASIC_INSTRUCTION_INFO disasm;
-    DbgDisasmFastAt(rvaToVa(getInitialSelection()), &disasm);
-    if(!*disasm.instruction)
-        return;
-    char* space = strstr(disasm.instruction, " ");
-    if(space)
-        *space = '\0';
-    DbgCmdExecDirect(QString("mnemonichelp %1").arg(disasm.instruction).toUtf8().constData());
+    unsigned char data[16] = { 0xCC };
+    auto addr = rvaToVa(getInitialSelection());
+    DbgMemRead(addr, data, sizeof(data));
+    Zydis zydis;
+    zydis.Disassemble(addr, data);
+    DbgCmdExecDirect(QString("mnemonichelp %1").arg(zydis.Mnemonic().c_str()).toUtf8().constData());
     emit displayLogWidget();
 }
 
@@ -1995,4 +2040,33 @@ void CPUDisassembly::downloadCurrentSymbolsSlot()
     char module[MAX_MODULE_SIZE] = "";
     if(DbgGetModuleAt(rvaToVa(getInitialSelection()), module))
         DbgCmdExec(QString("symdownload \"%0\"").arg(module).toUtf8().constData());
+}
+
+void CPUDisassembly::ActionTraceRecordToggleRunTraceSlot()
+{
+    if(!DbgIsDebugging())
+        return;
+    if(DbgValFromString("tr.runtraceenabled()") == 1)
+        DbgCmdExec("StopRunTrace");
+    else
+    {
+        QString defaultFileName;
+        char moduleName[MAX_MODULE_SIZE];
+        QDateTime currentTime = QDateTime::currentDateTime();
+        duint defaultModule = DbgValFromString("mod.main()");
+        if(DbgFunctions()->ModNameFromAddr(defaultModule, moduleName, false))
+        {
+            defaultFileName = QString::fromUtf8(moduleName);
+        }
+        defaultFileName += "-" + QLocale(QString(currentLocale)).toString(currentTime.date()) + " " + currentTime.time().toString("hh-mm-ss") + ArchValue(".trace32", ".trace64");
+        BrowseDialog browse(this, tr("Select stored file"), tr("Store run trace to the following file"),
+                            tr("Run trace files (*.%1);;All files (*.*)").arg(ArchValue("trace32", "trace64")), QCoreApplication::applicationDirPath() + QDir::separator() + "db" + QDir::separator() + defaultFileName, true);
+        if(browse.exec() == QDialog::Accepted)
+        {
+            if(browse.path.contains(QChar('"')) || browse.path.contains(QChar('\'')))
+                SimpleErrorBox(this, tr("Error"), tr("File name contains invalid character."));
+            else
+                DbgCmdExec(QString("StartRunTrace \"%1\"").arg(browse.path).toUtf8().constData());
+        }
+    }
 }

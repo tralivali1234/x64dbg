@@ -67,7 +67,8 @@ INCLUDEPATH += \
     Src/Utils \
     Src/ThirdPartyLibs/snowman \
     Src/ThirdPartyLibs/ldconvert \
-    ../capstone_wrapper
+    ../zydis_wrapper \
+    ../zydis_wrapper/zydis/include
 
 # Resources, sources, headers, and forms
 RESOURCES += \
@@ -180,7 +181,12 @@ SOURCES += \
     Src/Gui/MessagesBreakpoints.cpp \
     Src/Gui/AboutDialog.cpp \
     Src/Gui/BreakpointMenu.cpp \
-    Src/Gui/ComboBoxDialog.cpp
+    Src/Gui/ComboBoxDialog.cpp \
+    Src/Utils/SymbolAutoCompleteModel.cpp \
+    Src/Tracer/TraceBrowser.cpp \
+    Src/Tracer/TraceFileReader.cpp \
+    Src/Tracer/TraceFileSearch.cpp \
+    Src/Gui/MultiItemsSelectWindow.cpp
 
 
 HEADERS += \
@@ -296,7 +302,13 @@ HEADERS += \
     Src/Gui/AboutDialog.h \
     Src/Gui/BreakpointMenu.h \
     Src/Gui/ComboBoxDialog.h \
-    Src/Utils/VaHistory.h
+    Src/Utils/VaHistory.h \
+    Src/Utils/SymbolAutoCompleteModel.h \
+    Src/Tracer/TraceBrowser.h \
+    Src/Tracer/TraceFileReader.h \
+    Src/Tracer/TraceFileReaderInternal.h \
+    Src/Tracer/TraceFileSearch.h \
+    Src/Gui/MultiItemsSelectWindow.h
     
 
 FORMS += \
@@ -347,15 +359,13 @@ LIBS += -luser32 -ladvapi32 -lwinmm -lshell32
 
 !contains(QMAKE_HOST.arch, x86_64) {
     # Windows x86 (32bit) specific build
-    LIBS += -L"$$PWD/../capstone_wrapper/capstone" -lcapstone_x86
-    LIBS += -L"$$PWD/../capstone_wrapper/bin/x32$${DIR_SUFFIX}" -lcapstone_wrapper
+    LIBS += -L"$$PWD/../zydis_wrapper/bin/x32$${DIR_SUFFIX}" -lzydis_wrapper
     LIBS += -L"$$PWD/Src/ThirdPartyLibs/snowman" -lsnowman_x86
     LIBS += -L"$$PWD/Src/ThirdPartyLibs/ldconvert" -lldconvert_x86
     LIBS += -L"$${X64_BIN_DIR}" -lx32bridge
 } else {
     # Windows x64 (64bit) specific build
-    LIBS += -L"$$PWD/../capstone_wrapper/capstone" -lcapstone_x64
-    LIBS += -L"$$PWD/../capstone_wrapper/bin/x64$${DIR_SUFFIX}" -lcapstone_wrapper
+    LIBS += -L"$$PWD/../zydis_wrapper/bin/x64$${DIR_SUFFIX}" -lzydis_wrapper
     LIBS += -L"$$PWD/Src/ThirdPartyLibs/snowman" -lsnowman_x64
     LIBS += -L"$$PWD/Src/ThirdPartyLibs/ldconvert" -lldconvert_x64
     LIBS += -L"$${X64_BIN_DIR}" -lx64bridge

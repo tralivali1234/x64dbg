@@ -6,7 +6,6 @@
 enum WAIT_ID
 {
     WAITID_RUN,
-    WAITID_STOP,
     WAITID_LAST
 };
 
@@ -73,6 +72,7 @@ enum SectionLock
     LockTypeManager,
     LockModuleHashes,
     LockFormatFunctions,
+    LockDllBreakpoints,
 
     // Number of elements in this enumeration. Must always be the last index.
     LockLast

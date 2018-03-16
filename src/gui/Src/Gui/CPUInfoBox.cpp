@@ -81,43 +81,6 @@ void CPUInfoBox::clear()
     setInfoLine(3, "");
 }
 
-QString CPUInfoBox::getSymbolicName(dsint addr)
-{
-    char labelText[MAX_LABEL_SIZE] = "";
-    char moduleText[MAX_MODULE_SIZE] = "";
-    char string[MAX_STRING_SIZE] = "";
-    bool bHasString = DbgGetStringAt(addr, string);
-    bool bHasLabel = DbgGetLabelAt(addr, SEG_DEFAULT, labelText);
-    bool bHasModule = (DbgGetModuleAt(addr, moduleText) && !QString(labelText).startsWith("JMP.&"));
-    QString addrText = DbgMemIsValidReadPtr(addr) ? ToPtrString(addr) : ToHexString(addr);
-    QString finalText;
-    if(bHasString)
-        finalText = addrText + " " + QString(string);
-    else if(bHasLabel && bHasModule) //<module.label>
-        finalText = QString("<%1.%2>").arg(moduleText).arg(labelText);
-    else if(bHasModule) //module.addr
-        finalText = QString("%1.%2").arg(moduleText).arg(addrText);
-    else if(bHasLabel) //<label>
-        finalText = QString("<%1>").arg(labelText);
-    else
-    {
-        finalText = addrText;
-        if(addr == (addr & 0xFF))
-        {
-            QChar c = QChar((char)addr);
-            if(c.isPrint() || c.isSpace())
-                finalText += QString(" '%1'").arg(EscapeCh(c));
-        }
-        else if(addr == (addr & 0xFFF)) //UNICODE?
-        {
-            QChar c = QChar((ushort)addr);
-            if(c.isPrint() || c.isSpace())
-                finalText += QString(" L'%1'").arg(EscapeCh(c));
-        }
-    }
-    return finalText;
-}
-
 void CPUInfoBox::disasmSelectionChanged(dsint parVA)
 {
     curAddr = parVA;
@@ -164,30 +127,32 @@ void CPUInfoBox::disasmSelectionChanged(dsint parVA)
             bool ok;
             argMnemonic.toULongLong(&ok, 16);
             QString valText = DbgMemIsValidReadPtr(arg.value) ? ToPtrString(arg.value) : ToHexString(arg.value);
-            auto valTextSym = getSymbolicName(arg.value);
+            auto valTextSym = getSymbolicNameStr(arg.value);
             if(!valTextSym.contains(valText))
                 valText = QString("%1 %2").arg(valText, valTextSym);
             else
                 valText = valTextSym;
             argMnemonic = !ok ? QString("%1]=[%2").arg(argMnemonic).arg(valText) : valText;
             QString sizeName = "";
-            int memsize = basicinfo.memory.size;
-            switch(memsize)
+            bool knownsize = true;
+            switch(basicinfo.memory.size)
             {
             case size_byte:
-                sizeName = "byte ptr";
+                sizeName = "byte ptr ";
                 break;
             case size_word:
-                sizeName = "word ptr";
+                sizeName = "word ptr ";
                 break;
             case size_dword:
-                sizeName = "dword ptr";
+                sizeName = "dword ptr ";
                 break;
             case size_qword:
-                sizeName = "qword ptr";
+                sizeName = "qword ptr ";
+                break;
+            default:
+                knownsize = false;
                 break;
             }
-            sizeName.append(' ');
 
             sizeName += [](SEGMENTREG seg)
             {
@@ -214,17 +179,48 @@ void CPUInfoBox::disasmSelectionChanged(dsint parVA)
                 sizeName = sizeName.toUpper();
 
             if(!DbgMemIsValidReadPtr(arg.value))
-                setInfoLine(j, sizeName + "[" + argMnemonic + "]=???");
-            else
             {
-                QString addrText = getSymbolicName(arg.memvalue);
+                setInfoLine(j, sizeName + "[" + argMnemonic + "]=???");
+            }
+            else if(knownsize)
+            {
+                QString addrText = getSymbolicNameStr(arg.memvalue);
                 setInfoLine(j, sizeName + "[" + argMnemonic + "]=" + addrText);
             }
+            else
+            {
+                //TODO: properly support XMM constants
+                QVector<unsigned char> data;
+                data.resize(basicinfo.memory.size);
+                memset(data.data(), 0, data.size());
+                if(DbgMemRead(arg.value, data.data(), data.size()))
+                {
+                    QString hex;
+                    hex.reserve(data.size() * 3);
+                    for(int k = 0; k < data.size(); k++)
+                    {
+                        if(k)
+                            hex.append(' ');
+                        hex.append(ToByteString(data[k]));
+                    }
+                    setInfoLine(j, sizeName + "[" + argMnemonic + "]=" + hex);
+                }
+                else
+                {
+                    setInfoLine(j, sizeName + "[" + argMnemonic + "]=???");
+                }
+            }
+
             j++;
         }
         else
         {
-            auto symbolicName = getSymbolicName(arg.value);
+            QString valText = DbgMemIsValidReadPtr(arg.value) ? ToPtrString(arg.value) : ToHexString(arg.value);
+            auto symbolicName = getSymbolicNameStr(arg.value);
+            if(!symbolicName.contains(valText))
+                valText = QString("%1 (%2)").arg(symbolicName, valText);
+            else
+                valText = symbolicName;
             QString mnemonic(arg.mnemonic);
             bool ok;
             mnemonic.toULongLong(&ok, 16);
@@ -238,7 +234,7 @@ void CPUInfoBox::disasmSelectionChanged(dsint parVA)
                     !mnemonic.startsWith("ymm") &&
                     !mnemonic.startsWith("st"))
             {
-                setInfoLine(j, mnemonic + "=" + symbolicName);
+                setInfoLine(j, mnemonic + "=" + valText);
                 j++;
             }
         }

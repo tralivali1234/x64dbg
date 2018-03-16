@@ -16,7 +16,33 @@ bool MODRELOCATIONINFO::Contains(duint Address) const
     return Address >= rva && Address < rva + size;
 }
 
-void ReadBaseRelocationTable(MODINFO & Info, ULONG_PTR FileMapVA)
+static void ReadTlsCallbacks(MODINFO & Info, ULONG_PTR FileMapVA)
+{
+    // TODO: proper bounds checking
+
+    // Clear TLS callbacks
+    Info.tlsCallbacks.clear();
+
+    // Get address and size of base relocation table
+    duint tlsDirRva = GetPE32DataFromMappedFile(FileMapVA, 0, UE_TLSTABLEADDRESS);
+    duint tlsDirSize = GetPE32DataFromMappedFile(FileMapVA, 0, UE_TLSTABLESIZE);
+    if(tlsDirRva == 0 || tlsDirSize == 0)
+        return;
+
+    auto tlsDir = PIMAGE_TLS_DIRECTORY(ConvertVAtoFileOffsetEx(FileMapVA, Info.loadedSize, 0, tlsDirRva, true, false) + FileMapVA);
+    if(!tlsDir || !tlsDir->AddressOfCallBacks)
+        return;
+
+    auto imageBase = GetPE32DataFromMappedFile(FileMapVA, 0, UE_IMAGEBASE);
+    auto tlsArray = PULONG_PTR(ConvertVAtoFileOffsetEx(FileMapVA, Info.loadedSize, 0, tlsDir->AddressOfCallBacks - imageBase, true, false) + FileMapVA);
+    if(!tlsArray)
+        return;
+
+    while(*tlsArray)
+        Info.tlsCallbacks.push_back(*tlsArray++ - imageBase + Info.base);
+}
+
+static void ReadBaseRelocationTable(MODINFO & Info, ULONG_PTR FileMapVA)
 {
     // Clear relocations
     Info.relocations.clear();
@@ -142,6 +168,7 @@ void GetModuleInfo(MODINFO & Info, ULONG_PTR FileMapVA)
     // Clear imports by default
     Info.imports.clear();
 
+    ReadTlsCallbacks(Info, FileMapVA);
     ReadBaseRelocationTable(Info, FileMapVA);
 }
 
@@ -163,7 +190,7 @@ bool ModLoad(duint Base, duint Size, const char* FullPath)
 
         // Dir <- lowercase(file path)
         strcpy_s(dir, FullPath);
-        _strlwr(dir);
+        _strlwr_s(dir);
 
         // Find the last instance of a path delimiter (slash)
         char* fileStart = strrchr(dir, '\\');
@@ -424,6 +451,8 @@ duint ModBaseFromName(const char* Module)
     ASSERT_TRUE(len < MAX_MODULE_SIZE);
     SHARED_ACQUIRE(LockModules);
 
+    //TODO: refactor this to query from a map
+    duint candidate = 0;
     for(const auto & i : modinfo)
     {
         const auto & currentModule = i.second;
@@ -431,12 +460,16 @@ duint ModBaseFromName(const char* Module)
         strcpy_s(currentModuleName, currentModule.name);
         strcat_s(currentModuleName, currentModule.extension);
 
-        // Test with and without extension
-        if(!_stricmp(currentModuleName, Module) || !_stricmp(currentModule.name, Module))
+        // Compare with extension (perfect match)
+        if(!_stricmp(currentModuleName, Module))
             return currentModule.base;
+
+        // Compare without extension, possible candidate (thanks to chessgod101 for finding this)
+        if(!candidate && !_stricmp(currentModule.name, Module))
+            candidate = currentModule.base;
     }
 
-    return 0;
+    return candidate;
 }
 
 duint ModSizeFromAddr(duint Address)

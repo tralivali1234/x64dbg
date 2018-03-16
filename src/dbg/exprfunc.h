@@ -27,6 +27,7 @@ namespace Exprfunc
     duint membase(duint addr);
     duint memsize(duint addr);
     duint memiscode(duint addr);
+    duint memisstring(duint addr);
     duint memdecodepointer(duint ptr);
 
     duint dislen(duint addr);
@@ -47,6 +48,7 @@ namespace Exprfunc
 
     duint trenabled(duint addr);
     duint trhitcount(duint addr);
+    duint trisruntraceenabled();
     duint gettickcount();
 
     duint readbyte(duint addr);

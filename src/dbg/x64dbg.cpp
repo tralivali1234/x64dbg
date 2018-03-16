@@ -16,7 +16,7 @@
 #include "watch.h"
 #include "plugin_loader.h"
 #include "_dbgfunctions.h"
-#include <capstone_wrapper.h>
+#include <zydis_wrapper.h>
 #include "_scriptapi_gui.h"
 #include "filehelper.h"
 #include "database.h"
@@ -221,6 +221,8 @@ static void registercommands()
     dbgcmdnew("TraceSetCommand,SetTraceCommand", cbDebugTraceSetCommand, true); //Set trace command text + condition
     dbgcmdnew("TraceSetSwitchCondition,SetTraceSwitchCondition", cbDebugTraceSetSwitchCondition, true); //Set trace switch condition
     dbgcmdnew("TraceSetLogFile,SetTraceLogFile", cbDebugTraceSetLogFile, true); //Set trace log file
+    dbgcmdnew("StartRunTrace,opentrace", cbDebugStartRunTrace, true); //start run trace (Ollyscript command "opentrace" "opens run trace window")
+    dbgcmdnew("StopRunTrace,tc", cbDebugStopRunTrace, true); //stop run trace (and Ollyscript command)
 
     //thread control
     dbgcmdnew("createthread,threadcreate,newthread,threadnew", cbDebugCreatethread, true); //create thread
@@ -270,6 +272,7 @@ static void registercommands()
     dbgcmdnew("reffind,findref,ref", cbInstrRefFind, true); //find references to a value
     dbgcmdnew("reffindrange,findrefrange,refrange", cbInstrRefFindRange, true);
     dbgcmdnew("refstr,strref", cbInstrRefStr, true); //find string references
+    dbgcmdnew("reffunctionpointer", cbInstrRefFuncionPointer, true); //find function pointers
     dbgcmdnew("modcallfind", cbInstrModCallFind, true); //find intermodular calls
     dbgcmdnew("yara", cbInstrYara, true); //yara test command
     dbgcmdnew("yaramod", cbInstrYaramod, true); //yara rule on module
@@ -428,7 +431,7 @@ static void registercommands()
     dbgcmdnew("setstr,strset", cbInstrSetstr, false); //set a string variable
     dbgcmdnew("getstr,strget", cbInstrGetstr, false); //get a string variable
     dbgcmdnew("copystr,strcpy", cbInstrCopystr, true); //write a string variable to memory
-    dbgcmdnew("capstone", cbInstrCapstone, true); //disassemble using capstone
+    dbgcmdnew("zydis", cbInstrZydis, true); //disassemble using zydis
     dbgcmdnew("visualize", cbInstrVisualize, true); //visualize analysis
     dbgcmdnew("meminfo", cbInstrMeminfo, true); //command to debug memory map bugs
     dbgcmdnew("briefcheck", cbInstrBriefcheck, true); //check if mnemonic briefs are missing
@@ -552,18 +555,6 @@ static bool DbgScriptDllExec(const char* dll)
 
 static DWORD WINAPI loadDbThread(LPVOID)
 {
-    // Load mnemonic help database
-    String mnemonicHelpData;
-    if(FileHelper::ReadAllText(StringUtils::sprintf("%s\\..\\mnemdb.json", szProgramDir), mnemonicHelpData))
-    {
-        if(MnemonicHelp::loadFromText(mnemonicHelpData.c_str()))
-            dputs(QT_TRANSLATE_NOOP("DBG", "Mnemonic help database loaded!"));
-        else
-            dputs(QT_TRANSLATE_NOOP("DBG", "Failed to load mnemonic help database..."));
-    }
-    else
-        dputs(QT_TRANSLATE_NOOP("DBG", "Failed to read mnemonic help database..."));
-
     // Load error codes
     if(ErrorCodeInit(StringUtils::sprintf("%s\\..\\errordb.txt", szProgramDir)))
         dputs(QT_TRANSLATE_NOOP("DBG", "Error codes database loaded!"));
@@ -643,7 +634,7 @@ extern "C" DLL_EXPORT const char* _dbg_dbginit()
     json_set_alloc_funcs(json_malloc, json_free);
     //#endif //ENABLE_MEM_TRACE
     dputs(QT_TRANSLATE_NOOP("DBG", "Initializing capstone..."));
-    Capstone::GlobalInitialize();
+    Zydis::GlobalInitialize();
     dputs(QT_TRANSLATE_NOOP("DBG", "Initializing Yara..."));
     if(yr_initialize() != ERROR_SUCCESS)
         return "Failed to initialize Yara!";
@@ -729,6 +720,8 @@ extern "C" DLL_EXPORT const char* _dbg_dbginit()
     strcat_s(plugindir, "\\plugins");
     CreateDirectoryW(StringUtils::Utf8ToUtf16(plugindir).c_str(), nullptr);
     CreateDirectoryW(StringUtils::Utf8ToUtf16(StringUtils::sprintf("%s\\memdumps", szProgramDir)).c_str(), nullptr);
+    dputs(QT_TRANSLATE_NOOP("DBG", "Initialization successful!"));
+    bIsStopped = false;
     dputs(QT_TRANSLATE_NOOP("DBG", "Loading plugins..."));
     pluginloadall(plugindir);
     dputs(QT_TRANSLATE_NOOP("DBG", "Handling command line..."));
@@ -751,8 +744,6 @@ extern "C" DLL_EXPORT const char* _dbg_dbginit()
         DbgCmdExec(StringUtils::Utf16ToUtf8(StringUtils::sprintf(L"attach .%s, 0, .%s", argv[2], argv[4])).c_str()); //attach pid, 0, tid
     LocalFree(argv);
 
-    dputs(QT_TRANSLATE_NOOP("DBG", "Initialization successful!"));
-    bIsStopped = false;
     return nullptr;
 }
 
@@ -761,26 +752,21 @@ extern "C" DLL_EXPORT const char* _dbg_dbginit()
 */
 extern "C" DLL_EXPORT void _dbg_dbgexitsignal()
 {
+    dputs(QT_TRANSLATE_NOOP("DBG", "Stopping command thread..."));
+    bStopCommandLoopThread = true;
+    MsgFreeStack(gMsgStack);
+    WaitForThreadTermination(hCommandLoopThread);
     dputs(QT_TRANSLATE_NOOP("DBG", "Stopping running debuggee..."));
-    cbDebugStop(0, 0);
-    dputs(QT_TRANSLATE_NOOP("DBG", "Waiting for the debuggee to be stopped..."));
-    if(!waitfor(WAITID_STOP, 10000)) //after this, debugging stopped
-    {
-        dputs(QT_TRANSLATE_NOOP("DBG", "The debuggee does not close after 10 seconds. Probably the debugger state has been corrupted."));
-    }
+    cbDebugStop(0, 0); //after this, debugging stopped
     dputs(QT_TRANSLATE_NOOP("DBG", "Aborting scripts..."));
     scriptabort();
     dputs(QT_TRANSLATE_NOOP("DBG", "Unloading plugins..."));
     pluginunloadall();
-    dputs(QT_TRANSLATE_NOOP("DBG", "Stopping command thread..."));
-    bStopCommandLoopThread = true;
-    MsgFreeStack(gMsgStack);
-    WaitForThreadTermination(hCommandLoopThread, 10000);
     dputs(QT_TRANSLATE_NOOP("DBG", "Cleaning up allocated data..."));
     cmdfree();
     varfree();
     yr_finalize();
-    Capstone::GlobalFinalize();
+    Zydis::GlobalFinalize();
     dputs(QT_TRANSLATE_NOOP("DBG", "Cleaning up wait objects..."));
     waitdeinitialize();
     SafeDbghelpDeinitialize();

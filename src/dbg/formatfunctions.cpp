@@ -2,8 +2,54 @@
 #include "threading.h"
 #include "value.h"
 #include "memory.h"
+#include "exception.h"
+#include "ntdll/ntdll.h"
 
 std::unordered_map<String, FormatFunctions::Function> FormatFunctions::mFunctions;
+
+static FORMATRESULT formatErrorMsg(HMODULE DLL, const String & errName, DWORD code, char* dest, size_t destCount)
+{
+    const NTSTATUS ErrorStatus = code;
+    PMESSAGE_RESOURCE_ENTRY Entry;
+    NTSTATUS Status = RtlFindMessage(DLL,
+                                     LDR_FORMAT_MESSAGE_FROM_SYSTEM_MESSAGE_TABLE,
+                                     MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                                     ErrorStatus,
+                                     &Entry);
+    if(!NT_SUCCESS(Status))
+    {
+        if(destCount < errName.size() + 1)
+            return FORMAT_BUFFER_TOO_SMALL;
+        else
+        {
+            memcpy(dest, errName.c_str(), errName.size() + 1);
+            return FORMAT_SUCCESS;
+        }
+    }
+
+    if((Entry->Flags & MESSAGE_RESOURCE_UNICODE) != 0)
+    {
+        String UTF8Description = StringUtils::TrimRight(StringUtils::Utf16ToUtf8((const wchar_t*)Entry->Text));
+        if(UTF8Description.size() + 3 + errName.size() > destCount)
+            return FORMAT_BUFFER_TOO_SMALL;
+        else
+        {
+            sprintf_s(dest, destCount, "%s: %s", errName.c_str(), UTF8Description.c_str());
+            return FORMAT_SUCCESS;
+        }
+    }
+    else
+    {
+        String UTF8Description = StringUtils::TrimRight(StringUtils::LocalCpToUtf8((const char*)Entry->Text));
+        if(UTF8Description.size() + 3 + errName.size() > destCount)
+            return FORMAT_BUFFER_TOO_SMALL;
+        else
+        {
+            sprintf_s(dest, destCount, "%s: %s", errName.c_str(), UTF8Description.c_str());
+            return FORMAT_SUCCESS;
+        }
+    }
+}
 
 void FormatFunctions::Init()
 {
@@ -12,18 +58,18 @@ void FormatFunctions::Init()
         duint size;
         if(argc < 2 || !valfromstring(argv[1], &size))
         {
-            strcpy_s(dest, destCount, "Invalid argument...");
+            strcpy_s(dest, destCount, GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Invalid argument...")));
             return FORMAT_ERROR_MESSAGE;
         }
-        if(size > 1024 * 1024 * 10) //10mb max
+        if(size > 1024 * 1024 * 10) //10MB max
         {
-            strcpy_s(dest, destCount, "Too much data (10mb max)...");
+            strcpy_s(dest, destCount, GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Too much data (10MB max)...")));
             return FORMAT_ERROR_MESSAGE;
         }
         std::vector<unsigned char> data(size);
         if(!MemRead(addr, data.data(), data.size()))
         {
-            strcpy_s(dest, destCount, "Failed to read memory...");
+            strcpy_s(dest, destCount, GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Failed to read memory...")));
             return FORMAT_ERROR_MESSAGE;
         }
         auto result = StringUtils::ToHex(data.data(), data.size());
@@ -31,6 +77,39 @@ void FormatFunctions::Init()
             return FORMAT_BUFFER_TOO_SMALL;
         strcpy_s(dest, destCount, result.c_str());
         return FORMAT_SUCCESS;
+    });
+
+    Register("winerror", [](char* dest, size_t destCount, int argc, char* argv[], duint code, void* userdata)
+    {
+        std::vector<wchar_t> helpMessage(destCount);
+        String errName = ErrorCodeToName((unsigned int)code);
+#ifdef _WIN64
+        if((code >> 32) != 0)  //Data in high part: not an error code
+        {
+            errName = StringUtils::sprintf("%p", code);
+            if(destCount < errName.size() + 1)
+                return FORMAT_BUFFER_TOO_SMALL;
+            else
+            {
+                memcpy(dest, errName.c_str(), errName.size() + 1);
+                return FORMAT_SUCCESS;
+            }
+        }
+#endif //_WIN64
+        if(errName.size() == 0)
+            errName = StringUtils::sprintf("%08X", DWORD(code));
+
+        return formatErrorMsg(GetModuleHandleW(L"kernel32.dll"), errName, code, dest, destCount);
+    });
+
+    Register("ntstatus", [](char* dest, size_t destCount, int argc, char* argv[], duint code, void* userdata)
+    {
+        std::vector<wchar_t> helpMessage(destCount);
+        String errName = NtStatusCodeToName((unsigned int)code);
+        if(errName.size() == 0)
+            errName = StringUtils::sprintf("%08X", DWORD(code));
+
+        return formatErrorMsg(GetModuleHandleW(L"ntdll.dll"), errName, code, dest, destCount);
     });
 }
 

@@ -17,8 +17,6 @@
 #define ConfigHScrollBarStyle() "QScrollBar:horizontal{border:1px solid grey;background:#f1f1f1;height:10px}QScrollBar::handle:horizontal{background:#aaaaaa;min-width:20px;margin:1px}QScrollBar::add-line:horizontal,QScrollBar::sub-line:horizontal{width:0;height:0}"
 #define ConfigVScrollBarStyle() "QScrollBar:vertical{border:1px solid grey;background:#f1f1f1;width:10px}QScrollBar::handle:vertical{background:#aaaaaa;min-height:20px;margin:1px}QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{width:0;height:0}"
 
-
-
 class MenuBuilder;
 class QAction;
 
@@ -47,18 +45,14 @@ public:
     void save();
     void readColors();
     void writeColors();
-    void emitColorsUpdated();
-    void emitTokenizerConfigUpdated();
     void readBools();
     void writeBools();
     void readUints();
     void writeUints();
     void readFonts();
     void writeFonts();
-    void emitFontsUpdated();
     void readShortcuts();
     void writeShortcuts();
-    void emitShortcutsUpdated();
     void registerMenuBuilder(MenuBuilder* menu, size_t count);
     void registerMainMenuStringList(QList<QAction*>* menu);
 
@@ -115,6 +109,8 @@ signals:
     void fontsUpdated();
     void shortcutsUpdated();
     void tokenizerConfigUpdated();
+    void disableAutoCompleteUpdated();
+    void asciiAddressDumpModeUpdated();
 
 private:
     QColor colorFromConfig(const QString id);

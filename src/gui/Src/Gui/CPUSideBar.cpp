@@ -67,11 +67,11 @@ void CPUSideBar::updateColors()
 
 void CPUSideBar::updateFonts()
 {
-    m_DefaultFont = mDisas->font();
-    this->setFont(m_DefaultFont);
+    mDefaultFont = mDisas->font();
+    this->setFont(mDefaultFont);
 
     delete mFontMetrics;
-    mFontMetrics = new CachedFontMetrics(this, m_DefaultFont);
+    mFontMetrics = new CachedFontMetrics(this, mDefaultFont);
     fontWidth  = mFontMetrics->width(' ');
     fontHeight = mFontMetrics->height();
 
@@ -101,8 +101,7 @@ void CPUSideBar::reload()
 void CPUSideBar::changeTopmostAddress(dsint i)
 {
     topVA = i;
-    memset(&regDump, 0, sizeof(REGDUMP));
-    DbgGetRegDump(&regDump);
+    DbgGetRegDumpEx(&regDump, sizeof(REGDUMP));
     reload();
 }
 

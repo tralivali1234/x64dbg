@@ -1,5 +1,5 @@
 #include "main.h"
-#include "capstone_wrapper.h"
+#include "zydis_wrapper.h"
 #include "MainWindow.h"
 #include "Configuration.h"
 #include <QTextCodec>
@@ -107,7 +107,7 @@ int main(int argc, char* argv[])
     TLS_TranslatedStringMap = new std::map<DWORD, TranslatedStringStorage>();
 
     // initialize capstone
-    Capstone::GlobalInitialize();
+    Zydis::GlobalInitialize();
 
     // load config file + set config font
     mConfiguration = new Configuration;

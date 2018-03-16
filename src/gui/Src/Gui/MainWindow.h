@@ -33,6 +33,7 @@ class DisassemblerGraphView;
 class SimpleTraceDialog;
 class MRUList;
 class UpdateChecker;
+class TraceBrowser;
 
 namespace Ui
 {
@@ -88,8 +89,11 @@ public slots:
     void displaySnowmanWidget();
     void displayVariables();
     void displayGraphWidget();
+    void displayRunTrace();
     void displayPreviousTab();
     void displayNextTab();
+    void displayPreviousView();
+    void displayNextView();
     void hideTab();
     void openSettings();
     void openAppearance();
@@ -176,6 +180,7 @@ private:
     HandlesView* mHandlesView;
     NotesManager* mNotesManager;
     DisassemblerGraphView* mGraphView;
+    TraceBrowser* mTraceBrowser;
     SimpleTraceDialog* mSimpleTraceDialog;
     UpdateChecker* mUpdateChecker;
     DebugStatusLabel* mStatusLabel;
@@ -262,6 +267,7 @@ private:
 protected:
     void dragEnterEvent(QDragEnterEvent* pEvent);
     void dropEvent(QDropEvent* pEvent);
+    bool event(QEvent* event);
 
 public:
     static QString windowTitle;

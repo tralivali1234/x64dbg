@@ -11,6 +11,8 @@ HexDump::HexDump(QWidget* parent)
     memset(&data, 0, sizeof(SelectionData_t));
     mSelection = data;
 
+    setDrawDebugOnly(true);
+
     mGuiState = HexDump::NoState;
 
     setRowCount(0);
@@ -115,8 +117,7 @@ void HexDump::printDumpAt(dsint parVA, bool select, bool repaint, bool updateTab
 {
     duint wSize;
     auto wBase = DbgMemFindBaseAddr(parVA, &wSize); //get memory base
-    unsigned char test;
-    if(!wBase || !wSize || !DbgMemRead(wBase, &test, sizeof(test)))
+    if(!wBase || !wSize)
         return;
     dsint wRVA = parVA - wBase; //calculate rva
     int wBytePerRowCount = getBytePerRowCount(); //get the number of bytes per row
