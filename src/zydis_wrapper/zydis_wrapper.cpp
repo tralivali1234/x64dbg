@@ -6,6 +6,76 @@ bool Zydis::mInitialized = false;
 ZydisDecoder Zydis::mDecoder;
 ZydisFormatter Zydis::mFormatter;
 
+static const char* ZydisMnemonicGetStringHook(ZydisMnemonic mnemonic)
+{
+    switch(mnemonic)
+    {
+    case ZYDIS_MNEMONIC_JZ:
+        return "je";
+    case ZYDIS_MNEMONIC_JNZ:
+        return "jne";
+    case ZYDIS_MNEMONIC_JNBE:
+        return "ja";
+    case ZYDIS_MNEMONIC_JNB:
+        return "jae";
+    case ZYDIS_MNEMONIC_JNLE:
+        return "jg";
+    case ZYDIS_MNEMONIC_JNL:
+        return "jge";
+    case ZYDIS_MNEMONIC_CMOVNBE:
+        return "cmova";
+    case ZYDIS_MNEMONIC_CMOVNB:
+        return "cmovae";
+    case ZYDIS_MNEMONIC_CMOVZ:
+        return "cmove";
+    case ZYDIS_MNEMONIC_CMOVNLE:
+        return "cmovg";
+    case ZYDIS_MNEMONIC_CMOVNL:
+        return "cmovge";
+    case ZYDIS_MNEMONIC_CMOVNZ:
+        return "cmovne";
+    case ZYDIS_MNEMONIC_SETNBE:
+        return "seta";
+    case ZYDIS_MNEMONIC_SETNB:
+        return "setae";
+    case ZYDIS_MNEMONIC_SETZ:
+        return "sete";
+    case ZYDIS_MNEMONIC_SETNLE:
+        return "setg";
+    case ZYDIS_MNEMONIC_SETNL:
+        return "setge";
+    case ZYDIS_MNEMONIC_SETNZ:
+        return "setne";
+    default:
+        return ZydisMnemonicGetString(mnemonic);
+    }
+}
+
+static ZydisStatus ZydisPrintMnemonicIntelHook(const ZydisFormatter* formatter, ZydisString* string,
+        const ZydisDecodedInstruction* instruction, void* userData)
+{
+    ZYDIS_UNUSED_PARAMETER(userData);
+
+    if(!formatter || !instruction)
+    {
+        return ZYDIS_STATUS_INVALID_PARAMETER;
+    }
+
+    const char* mnemonic = ZydisMnemonicGetStringHook(instruction->mnemonic);
+    if(!mnemonic)
+    {
+        return ZydisStringAppendExC(string, "invalid", formatter->letterCase);
+    }
+    ZYDIS_CHECK(ZydisStringAppendExC(string, mnemonic, formatter->letterCase));
+
+    if(instruction->attributes & ZYDIS_ATTRIB_IS_FAR_BRANCH)
+    {
+        return ZydisStringAppendExC(string, " far", formatter->letterCase);
+    }
+
+    return ZYDIS_STATUS_SUCCESS;
+}
+
 void Zydis::GlobalInitialize()
 {
     if(!mInitialized)
@@ -20,6 +90,11 @@ void Zydis::GlobalInitialize()
         ZydisFormatterSetProperty(&mFormatter, ZYDIS_FORMATTER_PROP_HEX_PADDING_ADDR, 0);
         ZydisFormatterSetProperty(&mFormatter, ZYDIS_FORMATTER_PROP_HEX_PADDING_DISP, 0);
         ZydisFormatterSetProperty(&mFormatter, ZYDIS_FORMATTER_PROP_HEX_PADDING_IMM, 0);
+        ZydisFormatterSetProperty(&mFormatter, ZYDIS_FORMATTER_PROP_FORCE_MEMSIZE, ZYDIS_TRUE);
+        ZydisFormatterSetProperty(&mFormatter, ZYDIS_FORMATTER_PROP_FORCE_MEMSEG, ZYDIS_TRUE);
+
+        ZydisFormatterFunc fmtFunc = &ZydisPrintMnemonicIntelHook;
+        ZydisFormatterSetHook(&mFormatter, ZYDIS_FORMATTER_HOOK_PRINT_MNEMONIC, (const void**)&fmtFunc);
     }
 }
 
@@ -188,12 +263,18 @@ std::string Zydis::OperandText(int opindex) const
         nullptr
     );
 
-    //Remove [] from memory operands
+    //Extract only the part inside the []
     std::string result;
     if(op.type == ZYDIS_OPERAND_TYPE_MEMORY)
     {
-        result = buf + 1;
-        result.pop_back();
+        auto openBracket = strchr(buf, '[');
+        if(openBracket)
+        {
+            result = openBracket + 1;
+            result.pop_back();
+        }
+        else
+            result = buf;
     }
     else
         result = buf;
@@ -374,9 +455,9 @@ const ZydisDecodedOperand & Zydis::operator[](int index) const
 
 static bool isSafe64NopRegOp(const ZydisDecodedOperand & op)
 {
+#ifdef _WIN64
     if(op.type != ZYDIS_OPERAND_TYPE_REGISTER)
         return true; //a non-register is safe
-#ifdef _WIN64
     switch(op.reg.value)
     {
     case ZYDIS_REGISTER_EAX:
@@ -387,6 +468,14 @@ static bool isSafe64NopRegOp(const ZydisDecodedOperand & op)
     case ZYDIS_REGISTER_ESP:
     case ZYDIS_REGISTER_ESI:
     case ZYDIS_REGISTER_EDI:
+    case ZYDIS_REGISTER_R8D:
+    case ZYDIS_REGISTER_R9D:
+    case ZYDIS_REGISTER_R10D:
+    case ZYDIS_REGISTER_R11D:
+    case ZYDIS_REGISTER_R12D:
+    case ZYDIS_REGISTER_R13D:
+    case ZYDIS_REGISTER_R14D:
+    case ZYDIS_REGISTER_R15D:
         return false; //32 bit register modifications clear the high part of the 64 bit register
     default:
         return true; //all other registers are safe
@@ -533,54 +622,7 @@ std::string Zydis::Mnemonic() const
 {
     if(!Success())
         return "???";
-
-    switch(mInstr.mnemonic)
-    {
-    case ZYDIS_MNEMONIC_JZ:
-        return "je";
-    case ZYDIS_MNEMONIC_JNZ:
-        return "jne";
-    case ZYDIS_MNEMONIC_JNBE:
-        return "ja";
-    case ZYDIS_MNEMONIC_JNB:
-        return "jae";
-    case ZYDIS_MNEMONIC_JNLE:
-        return "jg";
-    case ZYDIS_MNEMONIC_JNL:
-        return "jge";
-    case ZYDIS_MNEMONIC_CMOVNBE:
-        return "cmova";
-    case ZYDIS_MNEMONIC_CMOVNB:
-        return "cmovae";
-    case ZYDIS_MNEMONIC_CMOVZ:
-        return "cmove";
-    case ZYDIS_MNEMONIC_CMOVNLE:
-        return "cmovg";
-    case ZYDIS_MNEMONIC_CMOVNL:
-        return "cmovge";
-    case ZYDIS_MNEMONIC_CMOVNZ:
-        return "cmovne";
-    case ZYDIS_MNEMONIC_SETNBE:
-        return "seta";
-    case ZYDIS_MNEMONIC_SETNB:
-        return "setae";
-    case ZYDIS_MNEMONIC_SETZ:
-        return "sete";
-    case ZYDIS_MNEMONIC_SETNLE:
-        return "setg";
-    case ZYDIS_MNEMONIC_SETNL:
-        return "setge";
-    case ZYDIS_MNEMONIC_SETNZ:
-        return "setne";
-    default:
-        return ZydisMnemonicGetString(mInstr.mnemonic);
-    }
-}
-
-std::string Zydis::MnemonicId() const
-{
-    // Zydis doesn't have instruction IDs.
-    return Mnemonic();
+    return ZydisMnemonicGetStringHook(mInstr.mnemonic);
 }
 
 const char* Zydis::MemSizeName(int size) const
@@ -831,10 +873,22 @@ void Zydis::RegInfo(uint8_t regs[ZYDIS_REGISTER_MAX_VALUE + 1]) const
         {
         case ZYDIS_OPERAND_TYPE_REGISTER:
         {
-            if(op.action & ZYDIS_OPERAND_ACTION_MASK_READ)
+            switch(op.action)
+            {
+            case ZYDIS_OPERAND_ACTION_READ:
+            case ZYDIS_OPERAND_ACTION_CONDREAD:
                 regs[op.reg.value] |= RAIRead;
-            if(op.action & ZYDIS_OPERAND_ACTION_MASK_WRITE)
+                break;
+            case ZYDIS_OPERAND_ACTION_WRITE:
+            case ZYDIS_OPERAND_ACTION_CONDWRITE:
                 regs[op.reg.value] |= RAIWrite;
+                break;
+            case ZYDIS_OPERAND_ACTION_READWRITE:
+            case ZYDIS_OPERAND_ACTION_READ_CONDWRITE:
+            case ZYDIS_OPERAND_ACTION_CONDREAD_WRITE:
+                regs[op.reg.value] |= RAIRead | RAIWrite;
+                break;
+            }
             regs[op.reg.value] |= op.visibility == ZYDIS_OPERAND_VISIBILITY_HIDDEN ?
                                   RAIImplicit : RAIExplicit;
         }
@@ -904,5 +958,25 @@ const char* Zydis::FlagName(ZydisCPUFlag flag) const
         return "C3";
     default:
         return nullptr;
+    }
+}
+
+void Zydis::BytesGroup(uint8_t* prefixSize, uint8_t* opcodeSize, uint8_t* group1Size, uint8_t* group2Size, uint8_t* group3Size) const
+{
+    if(Success())
+    {
+        *prefixSize = mInstr.raw.prefixes.count;
+        *group1Size = mInstr.raw.disp.size / 8;
+        *group2Size = mInstr.raw.imm[0].size / 8;
+        *group3Size = mInstr.raw.imm[1].size / 8;
+        *opcodeSize = mInstr.length - *prefixSize - *group1Size - *group2Size - *group3Size;
+    }
+    else
+    {
+        *prefixSize = 0;
+        *opcodeSize = mInstr.length;
+        *group1Size = 0;
+        *group2Size = 0;
+        *group3Size = 0;
     }
 }

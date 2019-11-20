@@ -4,6 +4,7 @@
 #include "Configuration.h"
 #include "Bridge.h"
 #include "ExceptionRangeDialog.h"
+#include "MiscUtil.h"
 
 SettingsDialog::SettingsDialog(QWidget* parent) :
     QDialog(parent),
@@ -60,7 +61,7 @@ void SettingsDialog::LoadSettings()
     settings.engineCalcType = calc_unsigned;
     settings.engineBreakpointType = break_int3short;
     settings.engineUndecorateSymbolNames = true;
-    settings.engineEnableSourceDebugging = true;
+    settings.engineEnableSourceDebugging = false;
     settings.engineEnableTraceRecordDuringTrace = true;
     settings.engineNoScriptTimeout = false;
     settings.engineIgnoreInconsistentBreakpoints = false;
@@ -81,6 +82,7 @@ void SettingsDialog::LoadSettings()
     settings.disasmNoSourceLineAutoComments = false;
     settings.disasmMaxModuleSize = -1;
     settings.guiNoForegroundWindow = true;
+    settings.guiLoadSaveTabOrder = true;
     settings.guiDisableAutoComplete = false;
     settings.guiAsciiAddressDumpMode = false;
 
@@ -237,6 +239,7 @@ void SettingsDialog::LoadSettings()
     GetSettingBool("Gui", "NoForegroundWindow", &settings.guiNoForegroundWindow);
     GetSettingBool("Gui", "LoadSaveTabOrder", &settings.guiLoadSaveTabOrder);
     GetSettingBool("Gui", "ShowGraphRva", &settings.guiShowGraphRva);
+    GetSettingBool("Gui", "GraphZoomMode", &settings.guiGraphZoomMode);
     GetSettingBool("Gui", "ShowExitConfirmation", &settings.guiShowExitConfirmation);
     GetSettingBool("Gui", "DisableAutoComplete", &settings.guiDisableAutoComplete);
     GetSettingBool("Gui", "AsciiAddressDumpMode", &settings.guiAsciiAddressDumpMode);
@@ -248,6 +251,7 @@ void SettingsDialog::LoadSettings()
     ui->chkNoForegroundWindow->setChecked(settings.guiNoForegroundWindow);
     ui->chkSaveLoadTabOrder->setChecked(settings.guiLoadSaveTabOrder);
     ui->chkShowGraphRva->setChecked(settings.guiShowGraphRva);
+    ui->chkGraphZoomMode->setChecked(settings.guiGraphZoomMode);
     ui->chkShowExitConfirmation->setChecked(settings.guiShowExitConfirmation);
     ui->chkDisableAutoComplete->setChecked(settings.guiDisableAutoComplete);
     ui->chkAsciiAddressDumpMode->setChecked(settings.guiAsciiAddressDumpMode);
@@ -286,7 +290,7 @@ void SettingsDialog::LoadSettings()
 
         ui->chkConfirmBeforeAtt->setCheckState(bool2check(settings.miscSetJITAuto));
 
-        if(!DbgFunctions()->IsProcessElevated())
+        if(!BridgeIsProcessElevated())
         {
             ui->chkSetJIT->setDisabled(true);
             ui->chkConfirmBeforeAtt->setDisabled(true);
@@ -316,10 +320,12 @@ void SettingsDialog::LoadSettings()
     GetSettingBool("Misc", "UseLocalHelpFile", &settings.miscUseLocalHelpFile);
     GetSettingBool("Misc", "QueryProcessCookie", &settings.miscQueryProcessCookie);
     GetSettingBool("Misc", "QueryWorkingSet", &settings.miscQueryWorkingSet);
+    GetSettingBool("Misc", "TransparentExceptionStepping", &settings.miscTransparentExceptionStepping);
     ui->chkUtf16LogRedirect->setChecked(settings.miscUtf16LogRedirect);
     ui->chkUseLocalHelpFile->setChecked(settings.miscUseLocalHelpFile);
     ui->chkQueryProcessCookie->setChecked(settings.miscQueryProcessCookie);
     ui->chkQueryWorkingSet->setChecked(settings.miscQueryWorkingSet);
+    ui->chkTransparentExceptionStepping->setChecked(settings.miscTransparentExceptionStepping);
 }
 
 void SettingsDialog::SaveSettings()
@@ -388,6 +394,7 @@ void SettingsDialog::SaveSettings()
     BridgeSettingSetUint("Gui", "NoForegroundWindow", settings.guiNoForegroundWindow);
     BridgeSettingSetUint("Gui", "LoadSaveTabOrder", settings.guiLoadSaveTabOrder);
     BridgeSettingSetUint("Gui", "ShowGraphRva", settings.guiShowGraphRva);
+    BridgeSettingSetUint("Gui", "GraphZoomMode", settings.guiGraphZoomMode);
     BridgeSettingSetUint("Gui", "ShowExitConfirmation", settings.guiShowExitConfirmation);
     BridgeSettingSetUint("Gui", "DisableAutoComplete", settings.guiDisableAutoComplete);
     BridgeSettingSetUint("Gui", "AsciiAddressDumpMode", settings.guiAsciiAddressDumpMode);
@@ -420,6 +427,7 @@ void SettingsDialog::SaveSettings()
     BridgeSettingSetUint("Misc", "UseLocalHelpFile", settings.miscUseLocalHelpFile);
     BridgeSettingSetUint("Misc", "QueryProcessCookie", settings.miscQueryProcessCookie);
     BridgeSettingSetUint("Misc", "QueryWorkingSet", settings.miscQueryWorkingSet);
+    BridgeSettingSetUint("Misc", "TransparentExceptionStepping", settings.miscTransparentExceptionStepping);
 
     BridgeSettingFlush();
     Config()->load();
@@ -869,6 +877,12 @@ void SettingsDialog::on_chkShowGraphRva_toggled(bool checked)
     settings.guiShowGraphRva = checked;
 }
 
+void SettingsDialog::on_chkGraphZoomMode_toggled(bool checked)
+{
+    bTokenizerConfigUpdated = true;
+    settings.guiGraphZoomMode = checked;
+}
+
 void SettingsDialog::on_chkShowExitConfirmation_toggled(bool checked)
 {
     settings.guiShowExitConfirmation = checked;
@@ -899,4 +913,9 @@ void SettingsDialog::on_chkQueryProcessCookie_toggled(bool checked)
 void SettingsDialog::on_chkQueryWorkingSet_toggled(bool checked)
 {
     settings.miscQueryWorkingSet = checked;
+}
+
+void SettingsDialog::on_chkTransparentExceptionStepping_toggled(bool checked)
+{
+    settings.miscTransparentExceptionStepping = checked;
 }
