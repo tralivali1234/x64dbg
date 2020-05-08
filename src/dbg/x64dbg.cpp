@@ -402,6 +402,7 @@ static void registercommands()
     dbgcmdnew("AddFavouriteCommand", cbInstrAddFavCmd, false); //add favourite command
     dbgcmdnew("AddFavouriteToolShortcut,SetFavouriteToolShortcut", cbInstrSetFavToolShortcut, false); //set favourite tool shortcut
     dbgcmdnew("FoldDisassembly", cbInstrFoldDisassembly, true); //fold disassembly segment
+    dbgcmdnew("guiupdatetitle", cbDebugUpdateTitle, true); // set relevant disassembly title
 
     //misc
     dbgcmdnew("chd", cbInstrChd, false); //Change directory
@@ -629,6 +630,10 @@ extern "C" DLL_EXPORT const char* _dbg_dbginit()
     while(szProgramDir[len] != '\\')
         len--;
     szProgramDir[len] = 0;
+
+    strcpy_s(szDllLoaderPath, szProgramDir);
+    strcat_s(szDllLoaderPath, "\\loaddll.exe");
+
 #ifdef ENABLE_MEM_TRACE
     strcpy_s(alloctrace, szProgramDir);
     strcat_s(alloctrace, "\\alloctrace.txt");
