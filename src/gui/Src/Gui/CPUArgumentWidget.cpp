@@ -3,13 +3,10 @@
 #include "Configuration.h"
 #include "Bridge.h"
 
-CPUArgumentWidget::CPUArgumentWidget(QWidget* parent) :
+CPUArgumentWidget::CPUArgumentWidget(Architecture* architecture, QWidget* parent) :
     QWidget(parent),
     ui(new Ui::CPUArgumentWidget),
-    mTable(nullptr),
-    mCurrentCallingConvention(-1),
-    mStackOffset(0),
-    mAllowUpdate(true)
+    mArchitecture(architecture)
 {
     ui->setupUi(this);
     mTable = ui->table;
@@ -32,6 +29,7 @@ CPUArgumentWidget::CPUArgumentWidget(QWidget* parent) :
     connect(mFollowAddrStack, SIGNAL(triggered()), this, SLOT(followStackSlot()));
 
     connect(Bridge::getBridge(), SIGNAL(repaintTableView()), this, SLOT(refreshData()));
+    connect(Bridge::getBridge(), SIGNAL(disassembleAt(duint, duint)), this, SLOT(disassembleAtSlot(duint, duint)));
 }
 
 CPUArgumentWidget::~CPUArgumentWidget()
@@ -45,8 +43,9 @@ void CPUArgumentWidget::updateStackOffset(bool iscall)
     mStackOffset = cur.getStackOffset() + (iscall ? 0 : cur.getCallOffset());
 }
 
-void CPUArgumentWidget::disassembledAtSlot(dsint, dsint cip, bool, dsint)
+void CPUArgumentWidget::disassembleAtSlot(duint addr, duint cip)
 {
+    Q_UNUSED(addr);
     if(mCurrentCallingConvention == -1) //no calling conventions
     {
         mTable->setRowCount(0);
@@ -118,12 +117,12 @@ void CPUArgumentWidget::refreshData()
     mTable->reloadData();
 }
 
-static void configAction(QMenu & wMenu, const QIcon & icon, QAction* action, const QString & value, const QString & name)
+static void configAction(QMenu & menu, const QIcon & icon, QAction* action, const QString & value, const QString & name)
 {
     action->setText(QApplication::translate("CPUArgumentWidget", "Follow %1 in %2").arg(value).arg(name));
     action->setIcon(icon);
     action->setObjectName(value);
-    wMenu.addAction(action);
+    menu.addAction(action);
 }
 
 void CPUArgumentWidget::contextMenuSlot(QPoint pos)
@@ -134,7 +133,7 @@ void CPUArgumentWidget::contextMenuSlot(QPoint pos)
     if(int(mArgumentValues.size()) <= selection)
         return;
     auto value = mArgumentValues[selection];
-    QMenu wMenu(this);
+    QMenu menu(this);
     if(DbgMemIsValidReadPtr(value))
     {
         duint valueAddr;
@@ -150,27 +149,27 @@ void CPUArgumentWidget::contextMenuSlot(QPoint pos)
             return addr >= base && addr < base + size;
         };
 
-        configAction(wMenu, DIcon(ArchValue("processor32.png", "processor64.png")), mFollowDisasm, valueText, tr("Disassembler"));
-        configAction(wMenu, DIcon("dump.png"), mFollowDump, valueText, tr("Dump"));
+        configAction(menu, DIcon(ArchValue("processor32", "processor64")), mFollowDisasm, valueText, tr("Disassembler"));
+        configAction(menu, DIcon("dump"), mFollowDump, valueText, tr("Dump"));
         if(inStackRange(value))
-            configAction(wMenu, DIcon("stack.png"), mFollowStack, valueText, tr("Stack"));
+            configAction(menu, DIcon("stack"), mFollowStack, valueText, tr("Stack"));
         if(DbgMemIsValidReadPtr(valueAddr))
         {
-            configAction(wMenu, DIcon(ArchValue("processor32.png", "processor64.png")), mFollowAddrDisasm, valueAddrText, tr("Disassembler"));
-            configAction(wMenu, DIcon("dump.png"), mFollowDump, valueAddrText, tr("Dump"));
+            configAction(menu, DIcon(ArchValue("processor32", "processor64")), mFollowAddrDisasm, valueAddrText, tr("Disassembler"));
+            configAction(menu, DIcon("dump"), mFollowDump, valueAddrText, tr("Dump"));
             if(inStackRange(valueAddr))
-                configAction(wMenu, DIcon("stack.png"), mFollowAddrStack, valueAddrText, tr("Stack"));
+                configAction(menu, DIcon("stack"), mFollowAddrStack, valueAddrText, tr("Stack"));
         }
     }
-    QMenu wCopyMenu(tr("&Copy"));
-    wCopyMenu.setIcon(DIcon("copy.png"));
-    mTable->setupCopyMenu(&wCopyMenu);
-    if(wCopyMenu.actions().length())
+    QMenu copyMenu(tr("&Copy"));
+    copyMenu.setIcon(DIcon("copy"));
+    mTable->setupCopyMenu(&copyMenu);
+    if(copyMenu.actions().length())
     {
-        wMenu.addSeparator();
-        wMenu.addMenu(&wCopyMenu);
+        menu.addSeparator();
+        menu.addMenu(&copyMenu);
     }
-    wMenu.exec(mTable->mapToGlobal(pos));
+    menu.exec(mTable->mapToGlobal(pos));
 }
 
 void CPUArgumentWidget::followDisasmSlot()
@@ -178,7 +177,7 @@ void CPUArgumentWidget::followDisasmSlot()
     QAction* action = qobject_cast<QAction*>(sender());
     if(!action)
         return;
-    DbgCmdExec(QString("disasm \"%1\"").arg(action->objectName()).toUtf8().constData());
+    DbgCmdExec(QString("disasm \"%1\"").arg(action->objectName()));
 }
 
 void CPUArgumentWidget::followDumpSlot()
@@ -186,7 +185,7 @@ void CPUArgumentWidget::followDumpSlot()
     QAction* action = qobject_cast<QAction*>(sender());
     if(!action)
         return;
-    DbgCmdExec(QString("dump \"%1\"").arg(action->objectName()).toUtf8().constData());
+    DbgCmdExec(QString("dump \"%1\"").arg(action->objectName()));
 }
 
 void CPUArgumentWidget::followStackSlot()
@@ -194,7 +193,7 @@ void CPUArgumentWidget::followStackSlot()
     QAction* action = qobject_cast<QAction*>(sender());
     if(!action)
         return;
-    DbgCmdExec(QString("sdump \"%1\"").arg(action->objectName()).toUtf8().constData());
+    DbgCmdExec(QString("sdump \"%1\"").arg(action->objectName()));
 }
 
 void CPUArgumentWidget::loadConfig()
@@ -236,8 +235,6 @@ void CPUArgumentWidget::loadConfig()
 void CPUArgumentWidget::setupTable()
 {
     connect(mTable, SIGNAL(contextMenuSignal(QPoint)), this, SLOT(contextMenuSlot(QPoint)));
-    mTable->verticalScrollBar()->setStyleSheet(ConfigVScrollBarStyle());
-    mTable->horizontalScrollBar()->setStyleSheet(ConfigHScrollBarStyle());
     mTable->enableMultiSelection(false);
     mTable->setShowHeader(false);
     mTable->addColumnAt(0, "", false);

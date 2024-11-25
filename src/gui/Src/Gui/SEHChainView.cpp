@@ -18,7 +18,7 @@ SEHChainView::SEHChainView(StdTable* parent) : StdTable(parent)
 
 void SEHChainView::setupContextMenu()
 {
-    QIcon icon = DIcon(ArchValue("processor32.png", "processor64.png"));
+    QIcon icon = DIcon(ArchValue("processor32", "processor64"));
     mFollowAddress = new QAction(icon, tr("Follow &Address"), this);
     connect(mFollowAddress, SIGNAL(triggered()), this, SLOT(followAddress()));
     mFollowHandler = new QAction(icon, tr("Follow Handler"), this);
@@ -65,18 +65,18 @@ void SEHChainView::contextMenuSlot(const QPoint pos)
 {
     if(!DbgIsDebugging() || this->getRowCount() == 0)
         return;
-    QMenu wMenu(this); //create context menu
-    wMenu.addAction(mFollowAddress);
-    wMenu.addAction(mFollowHandler);
-    QMenu wCopyMenu(tr("&Copy"), this);
-    wCopyMenu.setIcon(DIcon("copy.png"));
-    setupCopyMenu(&wCopyMenu);
-    if(wCopyMenu.actions().length())
+    QMenu menu(this); //create context menu
+    menu.addAction(mFollowAddress);
+    menu.addAction(mFollowHandler);
+    QMenu copyMenu(tr("&Copy"), this);
+    copyMenu.setIcon(DIcon("copy"));
+    setupCopyMenu(&copyMenu);
+    if(copyMenu.actions().length())
     {
-        wMenu.addSeparator();
-        wMenu.addMenu(&wCopyMenu);
+        menu.addSeparator();
+        menu.addMenu(&copyMenu);
     }
-    wMenu.exec(mapToGlobal(pos)); //execute context menu
+    menu.exec(mapToGlobal(pos)); //execute context menu
 }
 
 void SEHChainView::doubleClickedSlot()
@@ -87,11 +87,11 @@ void SEHChainView::doubleClickedSlot()
 void SEHChainView::followAddress()
 {
     QString addrText = getCellContent(getInitialSelection(), 0);
-    DbgCmdExecDirect(QString("sdump " + addrText).toUtf8().constData());
+    DbgCmdExecDirect(QString("sdump " + addrText));
 }
 
 void SEHChainView::followHandler()
 {
     QString addrText = getCellContent(getInitialSelection(), 1);
-    DbgCmdExecDirect(QString("disasm " + addrText).toUtf8().constData());
+    DbgCmdExecDirect(QString("disasm " + addrText));
 }

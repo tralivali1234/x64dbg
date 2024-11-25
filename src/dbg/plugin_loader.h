@@ -26,7 +26,6 @@ struct PLUG_DATA
 {
     char plugpath[MAX_PATH];
     char plugname[MAX_PATH];
-    bool isLoaded;
     HINSTANCE hPlugin;
     PLUGINIT pluginit;
     PLUGSTOP plugstop;
@@ -67,7 +66,7 @@ struct PLUG_FORMATFUNCTION
 };
 
 //plugin management functions
-bool pluginload(const char* pluginname, bool loadall = false);
+bool pluginload(const char* pluginname);
 bool pluginunload(const char* pluginname, bool unloadall = false);
 void pluginloadall(const char* pluginDir);
 void pluginunloadall();
@@ -98,6 +97,7 @@ void pluginmenuentrysethotkey(int pluginHandle, int hEntry, const char* hotkey);
 bool pluginmenuremove(int hMenu);
 bool pluginmenuentryremove(int pluginHandle, int hEntry);
 bool pluginexprfuncregister(int pluginHandle, const char* name, int argc, CBPLUGINEXPRFUNCTION cbFunction, void* userdata);
+bool pluginexprfuncregisterex(int pluginHandle, const char* name, const ValueType & returnType, const ValueType* argTypes, size_t argCount, CBPLUGINEXPRFUNCTIONEX cbFunction, void* userdata);
 bool pluginexprfuncunregister(int pluginHandle, const char* name);
 bool pluginformatfuncregister(int pluginHandle, const char* type, CBPLUGINFORMATFUNCTION cbFunction, void* userdata);
 bool pluginformatfuncunregister(int pluginHandle, const char* type);

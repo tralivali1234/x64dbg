@@ -25,6 +25,7 @@ public:
     static String PadLeft(const String & s, size_t minLength, char ch);
     static String Utf16ToUtf8(const WString & wstr);
     static String Utf16ToUtf8(const wchar_t* wstr);
+    static String Utf16ToLocalCp(const WString & wstr);
     static WString Utf8ToUtf16(const String & str);
     static WString Utf8ToUtf16(const char* str);
     static String LocalCpToUtf8(const String & str);
@@ -47,6 +48,11 @@ public:
     static bool FromCompressedHex(const String & text, std::vector<unsigned char> & data);
     static int hackicmp(const char* s1, const char* s2);
 
+    static char ToLower(char ch)
+    {
+        return ch + (ch >= 'A' && ch <= 'Z') * 32;
+    }
+
     template<typename T>
     static String ToFloatingString(void* buffer)
     {
@@ -62,6 +68,35 @@ public:
         auto value = *(T*)buffer;
         return ToHex(value);
     }
+
+    struct CaseInsensitiveLess
+    {
+        bool operator()(const std::string & str1, const std::string & str2) const
+        {
+            return _stricmp(str1.c_str(), str2.c_str()) < 0;
+        }
+    };
+
+    struct CaseInsensitiveHash
+    {
+        size_t operator()(const std::string & str) const
+        {
+            size_t hash = 0;
+            for(auto ch : str)
+            {
+                hash = ToLower(ch) + 65599 * hash;
+            }
+            return hash;
+        }
+    };
+
+    struct CaseInsensitiveEqual
+    {
+        bool operator()(const std::string & str1, const std::string & str2) const
+        {
+            return _stricmp(str1.c_str(), str2.c_str()) == 0;
+        }
+    };
 
 private:
     static const String WHITESPACE;

@@ -4,11 +4,16 @@
 #include "filehelper.h"
 #include "value.h"
 #include "console.h"
+#include "threading.h"
+#include "module.h"
+#include "syscalls.h"
 
 static std::unordered_map<unsigned int, String> ExceptionNames;
 static std::unordered_map<unsigned int, String> NtStatusNames;
 static std::unordered_map<unsigned int, String> ErrorNames;
 static std::unordered_map<String, unsigned int> Constants;
+static std::unordered_map<unsigned int, String> SyscallIndices;
+static std::unordered_map<String, unsigned int> SyscallNames;
 
 static bool UniversalCodeInit(const String & file, std::unordered_map<unsigned int, String> & names, unsigned char radix)
 {
@@ -53,7 +58,8 @@ bool ConstantCodeInit(const String & constantFile)
     std::unordered_map<unsigned int, String> names;
     if(!UniversalCodeInit(constantFile, names, 0))
         return false;
-    for(auto it : names)
+    Constants.reserve(names.size());
+    for(const auto & it : names)
         Constants.insert({ it.second, it.first });
     return true;
 }
@@ -180,4 +186,111 @@ std::vector<CONSTANTINFO> ErrorCodeList()
         return strcmp(a.name, b.name) < 0;
     });
     return result;
+}
+
+bool SyscallInit()
+{
+    auto retrieveSyscalls = [](const char* moduleName)
+    {
+        auto moduleHandle = GetModuleHandleA(moduleName);
+        if(!moduleHandle)
+            return false;
+        char szModulePath[MAX_PATH];
+        if(!GetModuleFileNameA(moduleHandle, szModulePath, _countof(szModulePath)))
+            return false;
+        if(!ModLoad((duint)moduleHandle, 1, szModulePath, false))
+            return false;
+        auto info = ModInfoFromAddr((duint)moduleHandle);
+        if(info)
+        {
+            for(const MODEXPORT & exportEntry : info->exports)
+            {
+                if(strncmp(exportEntry.name.c_str(), "Nt", 2) != 0)
+                    continue;
+                auto exportData = (const unsigned char*)ModRvaToOffset(info->fileMapVA, info->headers, exportEntry.rva);
+                if(!exportData)
+                    continue;
+                // https://github.com/mrexodia/TitanHide/blob/1c6ba9796e320f399f998b23fba2729122597e87/TitanHide/ntdll.cpp#L75
+                DWORD index = -1;
+                for(int i = 0; i < 32; i++)
+                {
+                    if(exportData[i] == 0xC2 || exportData[i] == 0xC3)   //RET
+                    {
+                        break;
+                    }
+                    if(exportData[i] == 0xB8)   //mov eax,X
+                    {
+                        index = *(DWORD*)(exportData + i + 1);
+                        break;
+                    }
+                }
+                if(index != -1)
+                    SyscallIndices.emplace(index, exportEntry.name);
+            }
+        }
+        else
+        {
+            return false;
+        }
+        return true;
+    };
+
+    // See: https://github.com/x64dbg/ScyllaHide/blob/6817d32581b7a420322f34e36b1a1c8c3e4b434c/Scylla/Win32kSyscalls.h
+    auto result = retrieveSyscalls("ntdll.dll");
+    OSVERSIONINFOW versionInfo = { sizeof(OSVERSIONINFOW) };
+    GetVersionExW(&versionInfo);
+
+    if(versionInfo.dwBuildNumber >= 14393)
+    {
+        result = result && retrieveSyscalls("win32u.dll");
+    }
+    else
+    {
+        SyscallIndices.reserve(sizeof(Win32kSyscalls) / sizeof(Win32kSyscalls[0]));
+        for(auto & syscall : Win32kSyscalls)
+        {
+            auto index = syscall.GetSyscallIndex((USHORT)versionInfo.dwBuildNumber, ArchValue(true, false));
+            if(index != -1)
+                SyscallIndices.insert({ index, syscall.Name });
+        }
+    }
+
+    // Populate the name map
+    for(const auto & itr : SyscallIndices)
+    {
+        SyscallNames.emplace(itr.second, itr.first);
+    }
+
+    // Also allow lookup with only the least significant 14 bits
+    // Reference: https://alice.climent-pommeret.red/posts/a-syscall-journey-in-the-windows-kernel/
+    for(const auto & itr : SyscallIndices)
+    {
+        auto truncated = itr.first & 0x3FFF;
+        if(truncated != itr.first)
+        {
+            SyscallIndices.emplace(truncated, itr.second);
+        }
+    }
+
+    // Clear the GUI
+    ModClear(true);
+
+    return result;
+}
+
+const String & SyscallToName(unsigned int index)
+{
+    auto found = SyscallIndices.find(index & 0x3FFF);
+    return found != SyscallIndices.end() ? found->second : emptyString;
+}
+
+unsigned int SyscallToId(const String & name)
+{
+    if(name.find("Zw") == 0)
+    {
+        return SyscallToId("Nt" + name.substr(2));
+    }
+
+    auto found = SyscallNames.find(name);
+    return found != SyscallNames.end() ? found->second : -1;
 }

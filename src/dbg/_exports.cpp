@@ -35,7 +35,7 @@
 #include "TraceRecord.h"
 #include "recursiveanalysis.h"
 #include "dbghelp_safe.h"
-#include "symcache.h"
+#include "symbolinfo.h"
 
 static bool bOnlyCipAutoComments = false;
 static bool bNoSourceLineAutoComments = false;
@@ -48,7 +48,7 @@ extern "C" DLL_EXPORT duint _dbg_memfindbaseaddr(duint addr, duint* size)
 
 extern "C" DLL_EXPORT bool _dbg_memread(duint addr, unsigned char* dest, duint size, duint* read)
 {
-    return MemRead(addr, dest, size, read, true);
+    return MemRead(addr, dest, size, read);
 }
 
 extern "C" DLL_EXPORT bool _dbg_memwrite(duint addr, const unsigned char* src, duint size, duint* written)
@@ -61,8 +61,8 @@ extern "C" DLL_EXPORT bool _dbg_memmap(MEMMAP* memmap)
     SHARED_ACQUIRE(LockMemoryPages);
 
     int pagecount = (int)memoryPages.size();
-    memset(memmap, 0, sizeof(MEMMAP));
     memmap->count = pagecount;
+    memmap->page = nullptr;
     if(!pagecount)
         return true;
 
@@ -102,8 +102,8 @@ extern "C" DLL_EXPORT bool _dbg_isjumpgoingtoexecute(duint addr)
     unsigned char data[16];
     if(MemRead(addr, data, sizeof(data), nullptr, true))
     {
-        Zydis cp;
-        if(cp.Disassemble(addr, data))
+        Zydis zydis;
+        if(zydis.Disassemble(addr, data))
         {
             CONTEXT ctx;
             memset(&ctx, 0, sizeof(ctx));
@@ -116,7 +116,7 @@ extern "C" DLL_EXPORT bool _dbg_isjumpgoingtoexecute(duint addr)
             auto cflags = ctx.EFlags;
             auto ccx = ctx.Ecx;
 #endif //_WIN64
-            return cp.IsBranchGoingToExecute(cflags, ccx);
+            return zydis.IsBranchGoingToExecute(cflags, ccx);
         }
     }
     return false;
@@ -190,31 +190,35 @@ static bool getLabel(duint addr, char* label, bool noFuncOffset)
     else //no user labels
     {
         DWORD64 displacement = 0;
-        SymbolInfo symInfo;
-
-        bool res;
-        if(noFuncOffset)
-            res = SymbolFromAddressExact(addr, symInfo);
-        else
-            res = SymbolFromAddressExactOrLower(addr, symInfo);
-
-        if(res)
         {
-            displacement = (DWORD64)symInfo.disp;
+            SYMBOLINFOCPP symInfo;
 
-            //auto name = demanglePE32ExternCFunc(symInfo.decoratedName.c_str());
-            if(bUndecorateSymbolNames && !symInfo.undecoratedName.empty())
-                strncpy_s(label, MAX_LABEL_SIZE, symInfo.undecoratedName.c_str(), _TRUNCATE);
+            bool res;
+            if(noFuncOffset)
+                res = SymbolFromAddressExact(addr, &symInfo);
             else
-                strncpy_s(label, MAX_LABEL_SIZE, symInfo.decoratedName.c_str(), _TRUNCATE);
-            retval = !shouldFilterSymbol(label);
-            if(retval && displacement)
+                res = SymbolFromAddressExactOrLower(addr, &symInfo);
+
+            if(res)
             {
-                char temp[32];
-                sprintf_s(temp, "+%llX", displacement);
-                strncat_s(label, MAX_LABEL_SIZE, temp, _TRUNCATE);
+                displacement = (int32_t)(addr - symInfo.addr);
+
+                //auto name = demanglePE32ExternCFunc(symInfo.decoratedName.c_str());
+                if(bUndecorateSymbolNames && *symInfo.undecoratedSymbol != '\0')
+                    strncpy_s(label, MAX_LABEL_SIZE, symInfo.undecoratedSymbol, _TRUNCATE);
+                else
+                    strncpy_s(label, MAX_LABEL_SIZE, symInfo.decoratedSymbol, _TRUNCATE);
+
+                retval = !shouldFilterSymbol(label);
+                if(retval && displacement != 0)
+                {
+                    char temp[32];
+                    sprintf_s(temp, "+%llX", displacement);
+                    strncat_s(label, MAX_LABEL_SIZE, temp, _TRUNCATE);
+                }
             }
         }
+
         if(!retval)  //search for CALL <jmp.&user32.MessageBoxA>
         {
             BASIC_INSTRUCTION_INFO basicinfo;
@@ -224,21 +228,22 @@ static bool getLabel(duint addr, char* label, bool noFuncOffset)
                 duint val = 0;
                 if(MemRead(basicinfo.memory.value, &val, sizeof(val), nullptr, true))
                 {
+                    SYMBOLINFOCPP symInfo;
                     bool res;
                     if(noFuncOffset)
-                        res = SymbolFromAddressExact(val, symInfo);
+                        res = SymbolFromAddressExact(val, &symInfo);
                     else
-                        res = SymbolFromAddressExactOrLower(val, symInfo);
+                        res = SymbolFromAddressExactOrLower(val, &symInfo);
 
                     if(res)
                     {
                         //pSymbol->Name[pSymbol->MaxNameLen - 1] = '\0';
 
                         //auto name = demanglePE32ExternCFunc(pSymbol->Name);
-                        if(bUndecorateSymbolNames && !symInfo.undecoratedName.empty())
-                            _snprintf_s(label, MAX_LABEL_SIZE, _TRUNCATE, "JMP.&%s", symInfo.undecoratedName.c_str());
+                        if(bUndecorateSymbolNames && *symInfo.undecoratedSymbol != '\0')
+                            _snprintf_s(label, MAX_LABEL_SIZE, _TRUNCATE, "JMP.&%s", symInfo.undecoratedSymbol);
                         else
-                            _snprintf_s(label, MAX_LABEL_SIZE, _TRUNCATE, "JMP.&%s", symInfo.decoratedName.c_str());
+                            _snprintf_s(label, MAX_LABEL_SIZE, _TRUNCATE, "JMP.&%s", symInfo.decoratedSymbol);
                         retval = !shouldFilterSymbol(label);
                         if(retval && displacement)
                         {
@@ -287,6 +292,240 @@ static bool getLabel(duint addr, char* label, bool noFuncOffset)
     return retval;
 }
 
+static bool getAutoComment(duint addr, String & comment)
+{
+    bool retval = false;
+    duint disp;
+    char fileName[MAX_STRING_SIZE] = {};
+    int lineNumber = 0;
+    if(!bNoSourceLineAutoComments && SymGetSourceLine(addr, fileName, &lineNumber, &disp) && !disp)
+    {
+        char* actualName = fileName;
+        char* l = strrchr(fileName, '\\');
+        if(l)
+            actualName = l + 1;
+
+        comment = StringUtils::sprintf("%s:%u", actualName, lineNumber);
+        retval = true;
+    }
+    else
+    {
+        SHARED_ACQUIRE(LockModules);
+        auto modInfo = ModInfoFromAddr(addr);
+        if(modInfo != nullptr)
+        {
+            auto exportInfo = modInfo->findExport(addr - modInfo->base);
+            if(exportInfo != nullptr && exportInfo->forwarded)
+            {
+                comment = StringUtils::sprintf("-> %s", exportInfo->forwardName.c_str());
+                retval = true;
+                dputs(comment.c_str());
+            }
+        }
+    }
+
+    DISASM_INSTR instr;
+    String temp_string;
+    BRIDGE_ADDRINFO newinfo;
+    char string_text[MAX_STRING_SIZE] = "";
+
+    Zydis zydis;
+    auto getregs = !bOnlyCipAutoComments || addr == lastContext.cip;
+    disasmget(zydis, addr, &instr, getregs);
+    // Some nop variants have 'operands' that should be ignored
+    if(zydis.Success() && !zydis.IsNop())
+    {
+        //Ignore register values when not on CIP and OnlyCipAutoComments is enabled: https://github.com/x64dbg/x64dbg/issues/1383
+        if(!getregs)
+        {
+            for(int i = 0; i < instr.argcount; i++)
+                instr.arg[i].value = instr.arg[i].constant;
+        }
+
+        if(addr == lastContext.cip && (zydis.GetId() == ZYDIS_MNEMONIC_SYSCALL || (zydis.GetId() == ZYDIS_MNEMONIC_INT && zydis[0].imm.value.u == 0x2e)))
+        {
+            auto syscallName = SyscallToName((unsigned int)lastContext.cax);
+            if(!syscallName.empty())
+            {
+                if(!comment.empty())
+                {
+                    comment.push_back(',');
+                    comment.push_back(' ');
+                }
+                comment.append(syscallName);
+                retval = true;
+            }
+        }
+
+        for(int i = 0; i < instr.argcount; i++)
+        {
+            memset(&newinfo, 0, sizeof(BRIDGE_ADDRINFO));
+            newinfo.flags = flaglabel;
+
+            STRING_TYPE strtype = str_none;
+
+            if(instr.arg[i].constant == instr.arg[i].value)  //avoid: call <module.label> ; addr:label
+            {
+                auto constant = instr.arg[i].constant;
+                if(instr.arg[i].type == arg_normal && instr.arg[i].value == addr + instr.instr_size && zydis.IsCall())
+                    temp_string.assign("call $0");
+                else if(instr.arg[i].type == arg_normal && instr.arg[i].value == addr + instr.instr_size && zydis.IsJump())
+                    temp_string.assign("jmp $0");
+                else if(instr.type == instr_branch)
+                    continue;
+                else if(instr.arg[i].type == arg_normal && constant < 256 && (isprint(int(constant)) || isspace(int(constant))) && (strstr(instr.instruction, "cmp") || strstr(instr.instruction, "mov")))
+                {
+                    temp_string.assign(instr.arg[i].mnemonic);
+                    temp_string.push_back(':');
+                    temp_string.push_back('\'');
+                    temp_string.append(StringUtils::Escape((unsigned char)constant));
+                    temp_string.push_back('\'');
+                }
+                else if(DbgGetStringAt(instr.arg[i].constant, string_text))
+                {
+                    temp_string.assign(instr.arg[i].mnemonic);
+                    temp_string.push_back(':');
+                    temp_string.append(string_text);
+                }
+            }
+            else if(instr.arg[i].memvalue && (DbgGetStringAt(instr.arg[i].memvalue, string_text) || _dbg_addrinfoget(instr.arg[i].memvalue, instr.arg[i].segment, &newinfo)))
+            {
+                if(*string_text)
+                {
+                    temp_string.assign("[");
+                    temp_string.append(instr.arg[i].mnemonic);
+                    temp_string.push_back(']');
+                    temp_string.push_back(':');
+                    temp_string.append(string_text);
+                }
+                else if(*newinfo.label)
+                {
+                    temp_string.assign("[");
+                    temp_string.append(instr.arg[i].mnemonic);
+                    temp_string.push_back(']');
+                    temp_string.push_back(':');
+                    temp_string.append(newinfo.label);
+                }
+            }
+            else if(instr.arg[i].value && (DbgGetStringAt(instr.arg[i].value, string_text) || _dbg_addrinfoget(instr.arg[i].value, instr.arg[i].segment, &newinfo)))
+            {
+                if(instr.type != instr_normal)  //stack/jumps (eg add esp, 4 or jmp 401110) cannot directly point to strings
+                {
+                    if(*newinfo.label)
+                    {
+                        temp_string = instr.arg[i].mnemonic;
+                        temp_string.push_back(':');
+                        temp_string.append(newinfo.label);
+                    }
+                }
+                else if(*string_text)
+                {
+                    temp_string = instr.arg[i].mnemonic;
+                    temp_string.push_back(':');
+                    temp_string.append(string_text);
+                }
+                else if(*newinfo.label)
+                {
+                    temp_string = instr.arg[i].mnemonic;
+                    temp_string.push_back(':');
+                    temp_string.append(newinfo.label);
+                }
+            }
+            else
+                continue;
+
+            if(!strstr(comment.c_str(), temp_string.c_str()))  //avoid duplicate comments
+            {
+                if(!comment.empty())
+                {
+                    comment.push_back(',');
+                    comment.push_back(' ');
+                }
+                comment.append(temp_string);
+                retval = true;
+            }
+        }
+    }
+    BREAKPOINT bp;
+    // Add autocomment for breakpoints with BreakpointsView format because there's usually something useful
+    if(BpGet(addr, BPNORMAL, nullptr, &bp) || BpGet(addr, BPHARDWARE, nullptr, &bp))
+    {
+        temp_string.clear();
+        auto next = [&temp_string]()
+        {
+            if(!temp_string.empty())
+                temp_string += ", ";
+        };
+        if(!bp.breakCondition.empty())
+        {
+            next();
+            temp_string += GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "breakif"));
+            temp_string += "(";
+            temp_string += bp.breakCondition;
+            temp_string += ")";
+        }
+
+        if(bp.fastResume)
+        {
+            next();
+            temp_string += GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "fastresume()"));
+        }
+        else //fast resume skips all other steps
+        {
+            if(!bp.logText.empty())
+            {
+                next();
+                if(!bp.logCondition.empty())
+                {
+                    temp_string += GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "logif"));
+                    temp_string += "(";
+                    temp_string += bp.logCondition;
+                    temp_string += ", ";
+                }
+                else
+                {
+                    temp_string += GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "log"));
+                    temp_string += "(";
+                }
+                temp_string += bp.logText;
+                temp_string += ")";
+            }
+
+            if(!bp.commandText.empty())
+            {
+                next();
+                if(!bp.commandCondition.empty())
+                {
+                    temp_string += GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "cmdif"));
+                    temp_string += "(";
+                    temp_string += bp.commandCondition;
+                    temp_string += ", ";
+                }
+                else
+                {
+                    temp_string += GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "cmd"));
+                    temp_string += "(";
+                }
+                temp_string += bp.commandText;
+                temp_string += ")";
+            }
+        }
+        if(!temp_string.empty())
+        {
+            if(!comment.empty())
+            {
+                comment.push_back(',');
+                comment.push_back(' ');
+            }
+            comment.append(temp_string);
+            retval = true;
+        }
+    }
+    StringUtils::ReplaceAll(comment, "{", "{{");
+    StringUtils::ReplaceAll(comment, "}", "}}");
+    return retval;
+}
+
 extern "C" DLL_EXPORT bool _dbg_addrinfoget(duint addr, SEGMENTREG segment, BRIDGE_ADDRINFO* addrinfo)
 {
     if(!DbgIsDebugging())
@@ -331,129 +570,7 @@ extern "C" DLL_EXPORT bool _dbg_addrinfoget(duint addr, SEGMENTREG segment, BRID
         else
         {
             String comment;
-            DWORD dwDisplacement;
-            char fileName[MAX_STRING_SIZE] = {};
-            int lineNumber = 0;
-            if(!bNoSourceLineAutoComments && SymGetSourceLine(addr, fileName, &lineNumber, &dwDisplacement) && !dwDisplacement)
-            {
-
-                char* actualName = fileName;
-                char* l = strrchr(fileName, '\\');
-                if(l)
-                    actualName = l + 1;
-
-                comment = StringUtils::sprintf("%s:%u", actualName, lineNumber);
-                retval = true;
-            }
-
-            DISASM_INSTR instr;
-            String temp_string;
-            BRIDGE_ADDRINFO newinfo;
-            char string_text[MAX_STRING_SIZE] = "";
-
-            Zydis cp;
-            auto getregs = !bOnlyCipAutoComments || addr == lastContext.cip;
-            disasmget(cp, addr, &instr, getregs);
-            if(!cp.IsNop())
-            {
-                //Ignore register values when not on CIP and OnlyCipAutoComments is enabled: https://github.com/x64dbg/x64dbg/issues/1383
-                if(!getregs)
-                {
-                    for(int i = 0; i < instr.argcount; i++)
-                        instr.arg[i].value = instr.arg[i].constant;
-                }
-
-                for(int i = 0; i < instr.argcount; i++)
-                {
-                    memset(&newinfo, 0, sizeof(BRIDGE_ADDRINFO));
-                    newinfo.flags = flaglabel;
-
-                    STRING_TYPE strtype = str_none;
-
-                    if(instr.arg[i].constant == instr.arg[i].value) //avoid: call <module.label> ; addr:label
-                    {
-                        auto constant = instr.arg[i].constant;
-                        if(instr.arg[i].type == arg_normal && instr.arg[i].value == addr + instr.instr_size && cp.IsCall())
-                            temp_string.assign("call $0");
-                        else if(instr.arg[i].type == arg_normal && instr.arg[i].value == addr + instr.instr_size && cp.IsJump())
-                            temp_string.assign("jmp $0");
-                        else if(instr.type == instr_branch)
-                            continue;
-                        else if(instr.arg[i].type == arg_normal && constant < 256 && (isprint(int(constant)) || isspace(int(constant))) && (strstr(instr.instruction, "cmp") || strstr(instr.instruction, "mov")))
-                        {
-                            temp_string.assign(instr.arg[i].mnemonic);
-                            temp_string.push_back(':');
-                            temp_string.push_back('\'');
-                            temp_string.append(StringUtils::Escape((unsigned char)constant));
-                            temp_string.push_back('\'');
-                        }
-                        else if(DbgGetStringAt(instr.arg[i].constant, string_text))
-                        {
-                            temp_string.assign(instr.arg[i].mnemonic);
-                            temp_string.push_back(':');
-                            temp_string.append(string_text);
-                        }
-                    }
-                    else if(instr.arg[i].memvalue && (DbgGetStringAt(instr.arg[i].memvalue, string_text) || _dbg_addrinfoget(instr.arg[i].memvalue, instr.arg[i].segment, &newinfo)))
-                    {
-                        if(*string_text)
-                        {
-                            temp_string.assign("[");
-                            temp_string.append(instr.arg[i].mnemonic);
-                            temp_string.push_back(']');
-                            temp_string.push_back(':');
-                            temp_string.append(string_text);
-                        }
-                        else if(*newinfo.label)
-                        {
-                            temp_string.assign("[");
-                            temp_string.append(instr.arg[i].mnemonic);
-                            temp_string.push_back(']');
-                            temp_string.push_back(':');
-                            temp_string.append(newinfo.label);
-                        }
-                    }
-                    else if(instr.arg[i].value && (DbgGetStringAt(instr.arg[i].value, string_text) || _dbg_addrinfoget(instr.arg[i].value, instr.arg[i].segment, &newinfo)))
-                    {
-                        if(instr.type != instr_normal) //stack/jumps (eg add esp, 4 or jmp 401110) cannot directly point to strings
-                        {
-                            if(*newinfo.label)
-                            {
-                                temp_string = instr.arg[i].mnemonic;
-                                temp_string.push_back(':');
-                                temp_string.append(newinfo.label);
-                            }
-                        }
-                        else if(*string_text)
-                        {
-                            temp_string = instr.arg[i].mnemonic;
-                            temp_string.push_back(':');
-                            temp_string.append(string_text);
-                        }
-                        else if(*newinfo.label)
-                        {
-                            temp_string = instr.arg[i].mnemonic;
-                            temp_string.push_back(':');
-                            temp_string.append(newinfo.label);
-                        }
-                    }
-                    else
-                        continue;
-
-                    if(!strstr(comment.c_str(), temp_string.c_str())) //avoid duplicate comments
-                    {
-                        if(!comment.empty())
-                        {
-                            comment.push_back(',');
-                            comment.push_back(' ');
-                        }
-                        comment.append(temp_string);
-                        retval = true;
-                    }
-                }
-            }
-            StringUtils::ReplaceAll(comment, "{", "{{");
-            StringUtils::ReplaceAll(comment, "}", "}}");
+            retval = getAutoComment(addr, comment);
             strcpy_s(addrinfo->comment, "\1");
             strncat_s(addrinfo->comment, comment.c_str(), _TRUNCATE);
         }
@@ -705,13 +822,14 @@ extern "C" DLL_EXPORT int _dbg_getbplist(BPXTYPE type, BPMAP* bpmap)
 {
     if(!bpmap)
         return 0;
+
+    bpmap->count = 0;
+    bpmap->bp = nullptr;
+
     std::vector<BREAKPOINT> list;
     int bpcount = BpGetList(&list);
     if(bpcount == 0)
-    {
-        bpmap->count = 0;
         return 0;
-    }
 
     int retcount = 0;
     std::vector<BRIDGEBP> bridgeList;
@@ -750,10 +868,7 @@ extern "C" DLL_EXPORT int _dbg_getbplist(BPXTYPE type, BPMAP* bpmap)
         retcount++;
     }
     if(!retcount)
-    {
-        bpmap->count = retcount;
-        return retcount;
-    }
+        return 0;
     bpmap->count = retcount;
     bpmap->bp = (BRIDGEBP*)BridgeAlloc(sizeof(BRIDGEBP) * retcount);
     for(int i = 0; i < retcount; i++)
@@ -766,12 +881,12 @@ extern "C" DLL_EXPORT duint _dbg_getbranchdestination(duint addr)
     unsigned char data[MAX_DISASM_BUFFER];
     if(!MemIsValidReadPtr(addr, true) || !MemRead(addr, data, sizeof(data)))
         return 0;
-    Zydis cp;
-    if(!cp.Disassemble(addr, data))
+    Zydis zydis;
+    if(!zydis.Disassemble(addr, data))
         return 0;
-    if(cp.IsBranchType(Zydis::BTJmp | Zydis::BTCall | Zydis::BTLoop | Zydis::BTXbegin))
+    if(zydis.IsBranchType(Zydis::BTJmp | Zydis::BTCall | Zydis::BTLoop | Zydis::BTXbegin))
     {
-        auto opValue = cp.ResolveOpValue(0, [](ZydisRegister reg) -> size_t
+        auto opValue = (duint)zydis.ResolveOpValue(0, [](ZydisRegister reg) -> uint64_t
         {
             switch(reg)
             {
@@ -834,14 +949,10 @@ extern "C" DLL_EXPORT duint _dbg_getbranchdestination(duint addr)
                 return 0;
             }
         });
-        if(cp.OpCount() && cp[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
+        if(zydis.OpCount() && zydis[0].type == ZYDIS_OPERAND_TYPE_MEMORY)
         {
-#ifdef _WIN64
-            auto const tebseg = ZYDIS_REGISTER_GS;
-#else
-            auto const tebseg = ZYDIS_REGISTER_FS;
-#endif //_WIN64
-            if(cp[0].mem.segment == tebseg)
+            auto const tebseg = ArchValue(ZYDIS_REGISTER_FS, ZYDIS_REGISTER_GS);
+            if(zydis[0].mem.segment == tebseg)
                 opValue += duint(GetTEBLocation(hActiveThread));
             if(MemRead(opValue, &opValue, sizeof(opValue)))
                 return opValue;
@@ -849,7 +960,7 @@ extern "C" DLL_EXPORT duint _dbg_getbranchdestination(duint addr)
         else
             return opValue;
     }
-    if(cp.IsRet())
+    if(zydis.IsRet())
     {
         auto csp = lastContext.csp;
         duint dest = 0;
@@ -880,6 +991,7 @@ extern "C" DLL_EXPORT duint _dbg_sendmessage(DBGMSG type, void* param1, void* pa
         case DBG_WIN_EVENT_GLOBAL:
         case DBG_RELEASE_ENCODE_TYPE_BUFFER:
         case DBG_GET_TIME_WASTED_COUNTER:
+        case DBG_GET_DEBUG_ENGINE:
             break;
         //the rest is unsafe -> throw an exception when people try to call them
         default:
@@ -902,7 +1014,7 @@ extern "C" DLL_EXPORT duint _dbg_sendmessage(DBGMSG type, void* param1, void* pa
 
     case DBG_SCRIPT_RUN:
     {
-        scriptrun((int)(duint)param1);
+        scriptrun((int)(duint)param1, param2 != nullptr);
     }
     break;
 
@@ -955,16 +1067,32 @@ extern "C" DLL_EXPORT duint _dbg_sendmessage(DBGMSG type, void* param1, void* pa
     break;
 
     case DBG_SYMBOL_ENUM:
-    {
-        SYMBOLCBINFO* cbInfo = (SYMBOLCBINFO*)param1;
-        SymEnum(cbInfo->base, cbInfo->cbSymbolEnum, cbInfo->user);
-    }
-    break;
-
     case DBG_SYMBOL_ENUM_FROMCACHE:
     {
         SYMBOLCBINFO* cbInfo = (SYMBOLCBINFO*)param1;
-        SymEnumFromCache(cbInfo->base, cbInfo->cbSymbolEnum, cbInfo->user);
+        if(cbInfo->base == -1)
+        {
+            SHARED_ACQUIRE(LockModules);
+            auto info = ModInfoFromAddr(cbInfo->start);
+            if(info != nullptr && cbInfo->end >= info->base && cbInfo->end < info->base + info->size)
+            {
+                auto beginRva = cbInfo->start - info->base;
+                auto endRva = cbInfo->end - info->base;
+                if(beginRva > endRva)
+                {
+                    return false;
+                }
+                return SymEnum(info->base, cbInfo->cbSymbolEnum, cbInfo->user, beginRva, endRva, cbInfo->symbolMask);
+            }
+            else
+            {
+                return false;
+            }
+        }
+        else
+        {
+            return SymEnum(cbInfo->base, cbInfo->cbSymbolEnum, cbInfo->user, 0, -1, SYMBOL_MASK_ALL);
+        }
     }
     break;
 
@@ -1003,12 +1131,13 @@ extern "C" DLL_EXPORT duint _dbg_sendmessage(DBGMSG type, void* param1, void* pa
         valuesetsignedcalc(!settingboolget("Engine", "CalculationType")); //0:signed, 1:unsigned
         SetEngineVariable(UE_ENGINE_SET_DEBUG_PRIVILEGE, settingboolget("Engine", "EnableDebugPrivilege"));
         SetEngineVariable(UE_ENGINE_SAFE_ATTACH, settingboolget("Engine", "SafeAttach"));
+        SetEngineVariable(UE_ENGINE_MEMBP_ALT, settingboolget("Engine", "MembpAlt"));
+        SetEngineVariable(UE_ENGINE_DISABLE_ASLR, settingboolget("Engine", "DisableAslr"));
         bOnlyCipAutoComments = settingboolget("Disassembler", "OnlyCipAutoComments");
         bNoSourceLineAutoComments = settingboolget("Disassembler", "NoSourceLineAutoComments");
         bListAllPages = settingboolget("Engine", "ListAllPages");
         bUndecorateSymbolNames = settingboolget("Engine", "UndecorateSymbolNames");
         bEnableSourceDebugging = settingboolget("Engine", "EnableSourceDebugging");
-        bTraceRecordEnabledDuringTrace = settingboolget("Engine", "TraceRecordEnabledDuringTrace");
         bSkipInt3Stepping = settingboolget("Engine", "SkipInt3Stepping");
         bIgnoreInconsistentBreakpoints = settingboolget("Engine", "IgnoreInconsistentBreakpoints");
         bNoForegroundWindow = settingboolget("Gui", "NoForegroundWindow");
@@ -1016,6 +1145,7 @@ extern "C" DLL_EXPORT duint _dbg_sendmessage(DBGMSG type, void* param1, void* pa
         bNoWow64SingleStepWorkaround = settingboolget("Engine", "NoWow64SingleStepWorkaround");
         bQueryWorkingSet = settingboolget("Misc", "QueryWorkingSet");
         bForceLoadSymbols = settingboolget("Misc", "ForceLoadSymbols");
+        bTruncateBreakpointLogs = settingboolget("Engine", "TruncateBreakpointLogs");
         stackupdatesettings();
 
         duint setting;
@@ -1043,7 +1173,8 @@ extern "C" DLL_EXPORT duint _dbg_sendmessage(DBGMSG type, void* param1, void* pa
         }
 
         std::vector<char> settingText(MAX_SETTING_SIZE + 1, '\0');
-        dbgclearignoredexceptions();
+        bool unknownExceptionsFilterAdded = false;
+        dbgclearexceptionfilters();
         if(BridgeSettingGet("Exceptions", "IgnoreRange", settingText.data()))
         {
             char* context = nullptr;
@@ -1052,14 +1183,58 @@ extern "C" DLL_EXPORT duint _dbg_sendmessage(DBGMSG type, void* param1, void* pa
             {
                 unsigned long start;
                 unsigned long end;
-                if(sscanf_s(entry, "%08X-%08X", &start, &end) == 2 && start <= end)
+                if(strstr(entry, "debug") == nullptr && // check for old ignore format
+                        sscanf_s(entry, "%08X-%08X", &start, &end) == 2 && start <= end)
                 {
-                    ExceptionRange range;
-                    range.start = start;
-                    range.end = end;
-                    dbgaddignoredexception(range);
+                    ExceptionFilter filter;
+                    filter.range.start = start;
+                    filter.range.end = end;
+                    // Default settings for an ignore entry
+                    filter.breakOn = ExceptionBreakOn::SecondChance;
+                    filter.logException = true;
+                    filter.handledBy = ExceptionHandledBy::Debuggee;
+                    dbgaddexceptionfilter(filter);
+                }
+                else if(strstr(entry, "debug") != nullptr && // new filter format
+                        sscanf_s(entry, "%08X-%08X", &start, &end) == 2 && start <= end)
+                {
+                    ExceptionFilter filter;
+                    filter.range.start = start;
+                    filter.range.end = end;
+                    filter.breakOn = strstr(entry, "first") != nullptr ? ExceptionBreakOn::FirstChance : strstr(entry, "second") != nullptr ? ExceptionBreakOn::SecondChance : ExceptionBreakOn::DoNotBreak;
+                    filter.logException = strstr(entry, "nolog") == nullptr;
+                    filter.handledBy = strstr(entry, "debugger") != nullptr ? ExceptionHandledBy::Debugger : ExceptionHandledBy::Debuggee;
+                    dbgaddexceptionfilter(filter);
+                    if(filter.range.start == 0 && filter.range.start == filter.range.end)
+                        unknownExceptionsFilterAdded = true;
                 }
                 entry = strtok_s(nullptr, ",", &context);
+            }
+        }
+        if(!unknownExceptionsFilterAdded) // add a default filter for unknown exceptions if it was not yet present in settings
+        {
+            ExceptionFilter unknownExceptionsFilter;
+            unknownExceptionsFilter.range.start = unknownExceptionsFilter.range.end = 0;
+            unknownExceptionsFilter.breakOn = ExceptionBreakOn::FirstChance;
+            unknownExceptionsFilter.logException = true;
+            unknownExceptionsFilter.handledBy = ExceptionHandledBy::Debuggee;
+            dbgaddexceptionfilter(unknownExceptionsFilter);
+        }
+
+        // check if we need to change the main window title
+        bool bNewWindowLongPath = settingboolget("Gui", "WindowLongPath");
+        if(bWindowLongPath != bNewWindowLongPath)
+        {
+            bWindowLongPath = bNewWindowLongPath;
+            if(DbgIsDebugging())
+            {
+                duint addr = 0;
+                SELECTIONDATA selection;
+                if(GuiSelectionGet(GUI_DISASSEMBLY, &selection))
+                    addr = selection.start;
+                else
+                    addr = GetContextDataEx(hActiveThread, UE_CIP);
+                DebugUpdateTitleAsync(addr, false);
             }
         }
 
@@ -1079,6 +1254,14 @@ extern "C" DLL_EXPORT duint _dbg_sendmessage(DBGMSG type, void* param1, void* pa
             maxSkipExceptionCount = setting;
         else
             BridgeSettingSetUint("Engine", "MaxSkipExceptionCount", maxSkipExceptionCount);
+
+        duint newStringAlgorithm = 0;
+        if(!BridgeSettingGetUint("Engine", "NewStringAlgorithm", &newStringAlgorithm))
+        {
+            auto acp = GetACP();
+            newStringAlgorithm = acp == 932 || acp == 936 || acp == 949 || acp == 950 || acp == 951 || acp == 1251;
+        }
+        bNewStringAlgorithm = !!newStringAlgorithm;
     }
     break;
 
@@ -1194,7 +1377,7 @@ extern "C" DLL_EXPORT duint _dbg_sendmessage(DBGMSG type, void* param1, void* pa
     {
         BREAKPOINT bp;
         if(BpGet((duint)param1, BPNORMAL, 0, &bp))
-            return !(duint)bp.enabled;
+            return (duint)!bp.enabled;
         return (duint)false;
     }
     break;
@@ -1263,6 +1446,7 @@ extern "C" DLL_EXPORT duint _dbg_sendmessage(DBGMSG type, void* param1, void* pa
 
         if(info->refcount == 0)
         {
+            info->references = nullptr;
             return false;
         }
         else
@@ -1329,7 +1513,7 @@ extern "C" DLL_EXPORT duint _dbg_sendmessage(DBGMSG type, void* param1, void* pa
 
     case DBG_GET_STRING_AT:
     {
-        return disasmgetstringatwrapper(duint(param1), (char*)param2);
+        return disasmgetstringatwrapper(duint(param1), (char*)param2, true);
     }
     break;
 
@@ -1393,7 +1577,7 @@ extern "C" DLL_EXPORT duint _dbg_sendmessage(DBGMSG type, void* param1, void* pa
     case DBG_SELCHANGED:
     {
         PLUG_CB_SELCHANGED plugSelChanged;
-        plugSelChanged.hWindow = (int)param1;
+        plugSelChanged.hWindow = (int)(duint)param1;
         plugSelChanged.VA = (duint)param2;
         plugincbcall(CB_SELCHANGED, &plugSelChanged);
     }
@@ -1425,7 +1609,7 @@ extern "C" DLL_EXPORT duint _dbg_sendmessage(DBGMSG type, void* param1, void* pa
 
     case DBG_GET_PEB_ADDRESS:
     {
-        auto ProcessId = DWORD(param1);
+        auto ProcessId = (DWORD)(duint)param1;
         if(ProcessId == fdProcessInfo->dwProcessId)
             return (duint)GetPEBLocation(fdProcessInfo->hProcess);
         auto hProcess = TitanOpenProcess(PROCESS_QUERY_INFORMATION, false, ProcessId);
@@ -1441,7 +1625,7 @@ extern "C" DLL_EXPORT duint _dbg_sendmessage(DBGMSG type, void* param1, void* pa
 
     case DBG_GET_TEB_ADDRESS:
     {
-        auto ThreadId = DWORD(param1);
+        auto ThreadId = (DWORD)(duint)param1;
         auto tebAddress = ThreadGetLocalBase(ThreadId);
         if(tebAddress)
             return tebAddress;
@@ -1487,6 +1671,33 @@ extern "C" DLL_EXPORT duint _dbg_sendmessage(DBGMSG type, void* param1, void* pa
     {
         auto symbolptr = (const SYMBOLPTR*)param1;
         ((const SymbolInfoGui*)symbolptr->symbol)->convertToGuiSymbol(symbolptr->modbase, (SYMBOLINFO*)param2);
+    }
+    break;
+
+    case DBG_GET_DEBUG_ENGINE:
+    {
+        static auto debugEngine = []
+        {
+            duint setting = DebugEngineTitanEngine;
+            if(!BridgeSettingGetUint("Engine", "DebugEngine", &setting))
+            {
+                BridgeSettingSetUint("Engine", "DebugEngine", setting);
+            }
+            return (DEBUG_ENGINE)setting;
+        }();
+        return debugEngine;
+    }
+    break;
+
+    case DBG_GET_SYMBOL_INFO_AT:
+    {
+        return SymbolFromAddressExact((duint)param1, (SYMBOLINFO*)param2);
+    }
+    break;
+
+    case DBG_XREF_ADD_MULTI:
+    {
+        return XrefAddMulti((const XREF_EDGE*)param1, (duint)param2);
     }
     break;
     }

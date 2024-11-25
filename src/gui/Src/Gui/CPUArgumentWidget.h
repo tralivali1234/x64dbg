@@ -1,10 +1,10 @@
-#ifndef CPUARGUMENTWIDGET_H
-#define CPUARGUMENTWIDGET_H
+#pragma once
 
 #include <QWidget>
 #include <vector>
 #include "StdTable.h"
 #include "StringUtil.h"
+#include "Architecture.h"
 
 namespace Ui
 {
@@ -16,7 +16,7 @@ class CPUArgumentWidget : public QWidget
     Q_OBJECT
 
 public:
-    explicit CPUArgumentWidget(QWidget* parent = 0);
+    explicit CPUArgumentWidget(Architecture* architecture, QWidget* parent = nullptr);
     ~CPUArgumentWidget();
 
     static QString defaultArgFormat(const QString & format, const QString & expression)
@@ -41,7 +41,7 @@ public:
     }
 
 public slots:
-    void disassembledAtSlot(dsint addr, dsint cip, bool history, dsint newTableOffset);
+    void disassembleAtSlot(duint addr, duint cip);
     void refreshData();
 
 private slots:
@@ -134,11 +134,12 @@ private:
         }
     };
 
-    Ui::CPUArgumentWidget* ui;
-    StdTable* mTable;
-    int mCurrentCallingConvention;
-    duint mStackOffset;
-    bool mAllowUpdate;
+    Architecture* mArchitecture = nullptr;
+    Ui::CPUArgumentWidget* ui = nullptr;
+    StdTable* mTable = nullptr;
+    int mCurrentCallingConvention = -1;
+    duint mStackOffset = 0;
+    bool mAllowUpdate = true;
     std::vector<CallingConvention> mCallingConventions;
     std::vector<duint> mArgumentValues;
     QAction* mFollowDisasm;
@@ -153,5 +154,3 @@ private:
 
     void updateStackOffset(bool iscall);
 };
-
-#endif // CPUARGUMENTWIDGET_H

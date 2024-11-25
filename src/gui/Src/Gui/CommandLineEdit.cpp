@@ -113,10 +113,13 @@ void CommandLineEdit::execute()
     if(mCurrentScriptIndex == -1)
         return;
     GUISCRIPTEXECUTE exec = mScriptInfo[mCurrentScriptIndex].execute;
-    const QString & cmd = text();
+    QString cmd = text();
 
     if(exec)
     {
+        if(cmd.trimmed().isEmpty())
+            if(Config()->getBool("Gui", "AutoRepeatOnEnter"))
+                cmd = getLineFromHistory();
         // Send this string directly to the user
         exec(cmd.toUtf8().constData());
     }
@@ -180,7 +183,14 @@ void CommandLineEdit::autoCompleteUpdate(const QString text)
         {
             // Native auto-completion
             if(mCurrentScriptIndex == 0)
+            {
+                if(mDefaultCompletionsUpdated)
+                {
+                    mDefaultCompletions.removeDuplicates();
+                    mDefaultCompletionsUpdated = false;
+                }
                 mCompleterModel->setStringList(mDefaultCompletions);
+            }
         }
 
         // Restore index
@@ -192,7 +202,7 @@ void CommandLineEdit::autoCompleteUpdate(const QString text)
 void CommandLineEdit::autoCompleteAddCmd(const QString cmd)
 {
     mDefaultCompletions << cmd.split(QChar(','), QString::SkipEmptyParts);
-    mDefaultCompletions.removeDuplicates();
+    mDefaultCompletionsUpdated = true;
 }
 
 void CommandLineEdit::autoCompleteDelCmd(const QString cmd)
@@ -201,12 +211,14 @@ void CommandLineEdit::autoCompleteDelCmd(const QString cmd)
 
     for(int i = 0; i < deleteList.size(); i++)
         mDefaultCompletions.removeAll(deleteList.at(i));
+    mDefaultCompletionsUpdated = true;
 }
 
 void CommandLineEdit::autoCompleteClearAll()
 {
     // Update internal list only
     mDefaultCompletions.clear();
+    mDefaultCompletionsUpdated = false;
 }
 
 void CommandLineEdit::registerScriptType(SCRIPTTYPEINFO* info)
@@ -262,6 +274,18 @@ void CommandLineEdit::unregisterScriptType(int id)
 void CommandLineEdit::scriptTypeChanged(int index)
 {
     mCurrentScriptIndex = index;
+
+    // Custom placeholder for the default commands
+    duint timeWastedDebugging = 0;
+    BridgeSettingGetUint("Engine", "TimeWastedDebugging", &timeWastedDebugging);
+    if(index == 0 && timeWastedDebugging < 60 * 60 * 10)
+    {
+        setPlaceholderText(tr("Commands are comma separated (like assembly instructions): mov eax, ebx"));
+    }
+    else
+    {
+        setPlaceholderText(QString());
+    }
 
     // Force reset autocompletion (blank string)
     emit textEdited("");

@@ -1,8 +1,11 @@
+#include <QClipboard>
+#include <QRegularExpression>
 #include "BreakpointsView.h"
 #include "EditBreakpointDialog.h"
 #include "Bridge.h"
 #include "MenuBuilder.h"
 #include "Breakpoints.h"
+#include "DisassemblyPopup.h"
 
 BreakpointsView::BreakpointsView(QWidget* parent)
     : StdTable(parent), mExceptionMaxLength(0)
@@ -12,22 +15,22 @@ BreakpointsView::BreakpointsView(QWidget* parent)
         return getCharWidth() * count + 8;
     };
     addColumnAt(charWidth(9), tr("Type"), false);
-    addColumnAt(charWidth(sizeof(duint) * 2), tr("Address"), true);
+    addColumnAt(charWidth(sizeof(duint) * 2), tr("Address"), true, "", StdTable::SortBy::AsHex);
     addColumnAt(charWidth(35), tr("Module/Label/Exception"), true);
     addColumnAt(charWidth(8), tr("State"), true);
     addColumnAt(charWidth(50), tr("Disassembly"), true);
-    addColumnAt(charWidth(4), tr("Hits"), true);
+    addColumnAt(charWidth(4), tr("Hits"), true, "", StdTable::SortBy::AsInt);
     addColumnAt(0, tr("Summary"), true);
     loadColumnFromConfig("BreakpointsView");
 
-    mDisasm = new QBeaEngine(ConfigUint("Disassembler", "MaxModuleSize"));
+    mDisasm = new QZydis(ConfigUint("Disassembler", "MaxModuleSize"), Bridge::getArchitecture());
     mDisasm->UpdateConfig();
     enableMultiSelection(true);
 
     setupContextMenu();
 
     connect(Bridge::getBridge(), SIGNAL(updateBreakpoints()), this, SLOT(updateBreakpointsSlot()));
-    connect(Bridge::getBridge(), SIGNAL(disassembleAt(dsint, dsint)), this, SLOT(disassembleAtSlot(dsint, dsint)));
+    connect(Bridge::getBridge(), SIGNAL(disassembleAt(duint, duint)), this, SLOT(disassembleAtSlot(duint, duint)));
     connect(Config(), SIGNAL(tokenizerConfigUpdated()), this, SLOT(tokenizerConfigUpdatedSlot()));
 
     connect(this, SIGNAL(contextMenuSignal(QPoint)), this, SLOT(contextMenuSlot(QPoint)));
@@ -35,11 +38,13 @@ BreakpointsView::BreakpointsView(QWidget* parent)
     connect(this, SIGNAL(enterPressedSignal()), this, SLOT(followBreakpointSlot()));
 
     Initialize();
+
+    new DisassemblyPopup(this, Bridge::getArchitecture());
 }
 
 void BreakpointsView::setupContextMenu()
 {
-    mMenuBuilder = new MenuBuilder(this, [this](QMenu*)
+    mMenuBuilder = new MenuBuilder(this, [](QMenu*)
     {
         return DbgIsDebugging();
     });
@@ -48,27 +53,34 @@ void BreakpointsView::setupContextMenu()
     {
         return isValidBp();
     };
-
-    mMenuBuilder->addAction(makeShortcutAction(DIcon("breakpoint_remove.png"), tr("&Remove"), SLOT(removeBreakpointSlot()), "ActionDeleteBreakpoint"), validBp);
-    QAction* enableDisableBreakpoint = makeShortcutAction(DIcon("breakpoint_disable.png"), tr("Disable"), SLOT(toggleBreakpointSlot()), "ActionEnableDisableBreakpoint");
+    mMenuBuilder->addAction(makeAction(DIcon(ArchValue("processor32", "processor64")), tr("Follow breakpoint"), SLOT(followBreakpointSlot())), [this](QMenu*)
+    {
+        if(!isValidBp())
+            return false;
+        if(selectedBp().type == bp_exception)
+            return false;
+        return true;
+    });
+    mMenuBuilder->addAction(makeShortcutAction(DIcon("breakpoint_remove"), tr("&Remove"), SLOT(removeBreakpointSlot()), "ActionDeleteBreakpoint"), validBp);
+    QAction* enableDisableBreakpoint = makeShortcutAction(DIcon("breakpoint_disable"), tr("Disable"), SLOT(toggleBreakpointSlot()), "ActionEnableDisableBreakpoint");
     mMenuBuilder->addAction(enableDisableBreakpoint, [this, enableDisableBreakpoint](QMenu*)
     {
         if(!isValidBp() || !selectedBp().active)
             return false;
         if(selectedBp().enabled)
         {
-            enableDisableBreakpoint->setIcon(DIcon("breakpoint_disable.png"));
+            enableDisableBreakpoint->setIcon(DIcon("breakpoint_disable"));
             enableDisableBreakpoint->setText(tr("Disable"));
         }
         else
         {
-            enableDisableBreakpoint->setIcon(DIcon("breakpoint_enable.png"));
+            enableDisableBreakpoint->setIcon(DIcon("breakpoint_enable"));
             enableDisableBreakpoint->setText(tr("Enable"));
         }
         return true;
     });
-    mMenuBuilder->addAction(makeShortcutAction(DIcon("breakpoint_edit_alt.png"), tr("&Edit"), SLOT(editBreakpointSlot()), "ActionBinaryEdit"), validBp);
-    mMenuBuilder->addAction(makeShortcutAction(DIcon("breakpoint_reset_hitcount.png"), tr("Reset hit count"), SLOT(resetHitCountBreakpointSlot()), "ActionResetHitCountBreakpoint"), [this](QMenu*)
+    mMenuBuilder->addAction(makeShortcutAction(DIcon("breakpoint_edit_alt"), tr("&Edit"), SLOT(editBreakpointSlot()), "ActionEditBreakpoint"), validBp);
+    mMenuBuilder->addAction(makeShortcutAction(DIcon("breakpoint_reset_hitcount"), tr("Reset hit count"), SLOT(resetHitCountBreakpointSlot()), "ActionResetHitCountBreakpoint"), [this](QMenu*)
     {
         if(!isValidBp())
             return false;
@@ -76,7 +88,7 @@ void BreakpointsView::setupContextMenu()
     });
     mMenuBuilder->addSeparator();
 
-    QAction* enableAll = makeShortcutAction(DIcon("breakpoint_enable_all.png"), QString(), SLOT(enableAllBreakpointsSlot()), "ActionEnableAllBreakpoints");
+    QAction* enableAll = makeShortcutAction(DIcon("breakpoint_enable_all"), QString(), SLOT(enableAllBreakpointsSlot()), "ActionEnableAllBreakpoints");
     mMenuBuilder->addAction(enableAll, [this, enableAll](QMenu*)
     {
         if(!isValidBp())
@@ -84,7 +96,7 @@ void BreakpointsView::setupContextMenu()
         enableAll->setText(tr("Enable all (%1)").arg(bpTypeName(selectedBp().type)));
         return true;
     });
-    QAction* disableAll = makeShortcutAction(DIcon("breakpoint_disable_all.png"), QString(), SLOT(disableAllBreakpointsSlot()), "ActionDisableAllBreakpoints");
+    QAction* disableAll = makeShortcutAction(DIcon("breakpoint_disable_all"), QString(), SLOT(disableAllBreakpointsSlot()), "ActionDisableAllBreakpoints");
     mMenuBuilder->addAction(disableAll, [this, disableAll](QMenu*)
     {
         if(!isValidBp())
@@ -92,7 +104,7 @@ void BreakpointsView::setupContextMenu()
         disableAll->setText(tr("Disable all (%1)").arg(bpTypeName(selectedBp().type)));
         return true;
     });
-    QAction* removeAll = makeShortcutAction(DIcon("breakpoint_remove_all.png"), QString(), SLOT(removeAllBreakpointsSlot()), "ActionRemoveAllBreakpoints");
+    QAction* removeAll = makeShortcutAction(DIcon("breakpoint_remove_all"), QString(), SLOT(removeAllBreakpointsSlot()), "ActionRemoveAllBreakpoints");
     mMenuBuilder->addAction(removeAll, [this, removeAll](QMenu*)
     {
         if(!isValidBp())
@@ -102,13 +114,18 @@ void BreakpointsView::setupContextMenu()
     });
     mMenuBuilder->addSeparator();
 
-    mMenuBuilder->addAction(makeAction(DIcon("breakpoint_module_add.png"), tr("Add DLL breakpoint"), SLOT(addDllBreakpointSlot())));
-    mMenuBuilder->addAction(makeAction(DIcon("breakpoint_exception_add.png"), tr("Add exception breakpoint"), SLOT(addExceptionBreakpointSlot())));
+    mMenuBuilder->addAction(makeAction(DIcon("breakpoint_module_add"), tr("Add DLL breakpoint"), SLOT(addDllBreakpointSlot())));
+    mMenuBuilder->addAction(makeAction(DIcon("breakpoint_exception_add"), tr("Add exception breakpoint"), SLOT(addExceptionBreakpointSlot())));
     mMenuBuilder->addSeparator();
 
+    mMenuBuilder->addAction(makeAction(tr("Copy breakpoint conditions"), SLOT(copyConditionalBreakpointSlot())));
+    mMenuBuilder->addAction(makeAction(tr("Paste breakpoint conditions"), SLOT(pasteConditionalBreakpointSlot())), [](QMenu*)
+    {
+        return QApplication::clipboard()->text().size() > 10;
+    });
     MenuBuilder* copyMenu = new MenuBuilder(this);
     setupCopyMenu(copyMenu);
-    mMenuBuilder->addMenu(makeMenu(DIcon("copy.png"), tr("&Copy")), copyMenu);
+    mMenuBuilder->addMenu(makeMenu(DIcon("copy"), tr("&Copy")), copyMenu);
 }
 
 void BreakpointsView::updateColors()
@@ -125,7 +142,7 @@ void BreakpointsView::updateColors()
     updateBreakpointsSlot();
 }
 
-void BreakpointsView::sortRows(int column, bool ascending)
+void BreakpointsView::sortRows(duint column, bool ascending)
 {
     std::stable_sort(mData.begin(), mData.end(), [this, column, ascending](const std::vector<CellData> & a, const std::vector<CellData> & b)
     {
@@ -147,16 +164,16 @@ void BreakpointsView::sortRows(int column, bool ascending)
     });
 }
 
-QString BreakpointsView::paintContent(QPainter* painter, dsint rowBase, int rowOffset, int col, int x, int y, int w, int h)
+QString BreakpointsView::paintContent(QPainter* painter, duint row, duint col, int x, int y, int w, int h)
 {
-    if(isSelected(rowBase, rowOffset))
+    if(isSelected(row))
         painter->fillRect(QRect(x, y, w, h), QBrush(col == ColDisasm ? mDisasmSelectionColor : mSelectionColor));
     else if(col == ColDisasm)
         painter->fillRect(QRect(x, y, w, h), QBrush(mDisasmBackgroundColor));
-    auto index = bpIndex(rowBase + rowOffset);
+    auto index = bpIndex(row);
     auto & bp = mBps.at(index);
-    auto cellContent = getCellContent(rowBase + rowOffset, col);
-    if(col > ColType && !bp.addr && !bp.active)
+    auto cellContent = getCellContent(row, col);
+    if(col > ColType && bp.addr == 0 && !bp.active)
     {
         auto mid = h / 2.0;
         painter->drawLine(QPointF(x, y + mid), QPointF(x + w, y + mid));
@@ -199,19 +216,22 @@ void BreakpointsView::updateBreakpointsSlot()
             mExceptionMaxLength = std::max(mExceptionMaxLength, int(strlen(exceptions[i].name)));
         }
         mExceptionList.sort();
-
     }
-    BPMAP bpmap;
-    DbgGetBpList(bp_none, &bpmap);
-    setRowCount(bpmap.count);
+
+    if(DbgFunctions()->BpRefList == nullptr)
+        return;
+
+    duint count = 0;
+    auto refList = DbgFunctions()->BpRefList(&count);
+    setRowCount(count);
     mBps.clear();
-    mBps.reserve(bpmap.count + 5);
+    mBps.reserve(count + 5);
     mRich.clear();
-    mRich.reserve(bpmap.count + 5);
+    mRich.reserve(count + 5);
     BPXTYPE lasttype = bp_none;
-    for(int i = 0, row = 0; i < bpmap.count; i++, row++)
+    for(duint i = 0, row = 0; i < count; i++, row++)
     {
-        BRIDGEBP & bp = bpmap.bp[i];
+        Breakpoints::Data bp(refList[i]);
 
         if(lasttype != bp.type)
         {
@@ -228,8 +248,7 @@ void BreakpointsView::updateBreakpointsSlot()
             setCellContent(row, ColSummary, QString());
             row++;
 
-            BRIDGEBP fakebp;
-            memset(&fakebp, 0, sizeof(fakebp));
+            Breakpoints::Data fakebp;
             fakebp.type = lasttype;
             mBps.push_back(fakebp);
             mRich.push_back(std::make_pair(RichTextPainter::List(), RichTextPainter::List()));
@@ -243,7 +262,7 @@ void BreakpointsView::updateBreakpointsSlot()
         {
             if(bp.type == bp_dll)
             {
-                auto base = DbgModBaseFromName(bp.mod);
+                auto base = DbgModBaseFromName(bp.module.toUtf8().constData());
                 if(!base)
                     base = -1;
                 return ToPtrString(base);
@@ -260,9 +279,9 @@ void BreakpointsView::updateBreakpointsSlot()
                 return found == mExceptionMap.end() ? "" : found->second;
             }
             else if(bp.type != bp_dll && DbgGetLabelAt(bp.addr, SEG_DEFAULT, label))
-                return QString("<%1.%2>").arg(bp.mod, label);
+                return QString("<%1.%2>").arg(bp.module, label);
             else
-                return bp.mod;
+                return bp.module;
         };
         auto stateName = [&]()
         {
@@ -286,15 +305,22 @@ void BreakpointsView::updateBreakpointsSlot()
                 for(auto & token : richDisasm)
                     result += token.text;
             }
+            else
+            {
+                RichTextPainter::CustomRichText_t err;
+                err.text = "Failed to read: " + ToPtrString(bp.addr);
+                richDisasm.push_back(err);
+                return err.text;
+            }
             return result;
         };
-        //memory/hardware/dll/exception type, name, address comment, condition, log(text+condition), command(text+condition)
+        //memory/hardware/dll/exception type, name, address comment, condition, log(text+condition), command(text+condition), logFile(path)
         auto summaryText = [&]()
         {
             auto colored = [&richSummary](QString text, QColor color)
             {
                 RichTextPainter::CustomRichText_t token;
-                token.highlight = false;
+                token.underline = false;
                 token.flags = RichTextPainter::FlagColor;
                 token.textColor = color;
                 token.text = text;
@@ -303,7 +329,7 @@ void BreakpointsView::updateBreakpointsSlot()
             auto text = [this, &richSummary](QString text)
             {
                 RichTextPainter::CustomRichText_t token;
-                token.highlight = false;
+                token.underline = false;
                 token.flags = RichTextPainter::FlagColor;
                 token.textColor = this->mTextColor;
                 token.text = text;
@@ -321,7 +347,7 @@ void BreakpointsView::updateBreakpointsSlot()
                 next();
                 colored(comment, mSummaryStringColor);
             }
-            else if(*bp.name)
+            else if(!bp.name.isEmpty())
             {
                 next();
                 colored(bp.name, mSummaryStringColor);
@@ -448,10 +474,10 @@ void BreakpointsView::updateBreakpointsSlot()
                 return QString();
             }
 
-            if(*bp.breakCondition)
+            if(!bp.breakCondition.isEmpty())
             {
                 next();
-                colored("breakif", mSummaryKeywordColor);
+                colored(tr("breakif"), mSummaryKeywordColor);
                 colored("(", mSummaryParenColor);
                 text(bp.breakCondition);
                 colored(")", mSummaryParenColor);
@@ -465,38 +491,50 @@ void BreakpointsView::updateBreakpointsSlot()
             }
             else //fast resume skips all other steps
             {
-                if(*bp.logText)
+                if(!bp.logText.isEmpty())
                 {
                     next();
-                    colored(tr("log"), mSummaryKeywordColor);
-                    if(*bp.logCondition)
+                    if(!bp.logCondition.isEmpty())
                     {
-                        colored("if", mSummaryKeywordColor);
+                        colored(tr("logif"), mSummaryKeywordColor);
                         colored("(", mSummaryParenColor);
                         text(bp.logCondition);
                         colored(",", mSummaryParenColor);
                         text(" ");
                     }
                     else
+                    {
+                        colored(tr("log"), mSummaryKeywordColor);
                         colored("(", mSummaryParenColor);
+                    }
                     colored(QString("\"%1\"").arg(bp.logText), mSummaryStringColor);
+                    if(!bp.logFile.isEmpty())
+                    {
+                        colored(", ", mSummaryParenColor);
+                        colored("file", mSummaryKeywordColor);
+                        colored("(", mSummaryParenColor);
+                        colored(bp.logFile, mSummaryStringColor);
+                        colored(")", mSummaryParenColor);
+                    }
                     colored(")", mSummaryParenColor);
                 }
 
-                if(*bp.commandText)
+                if(!bp.commandText.isEmpty())
                 {
                     next();
-                    colored(tr("cmd"), mSummaryKeywordColor);
-                    if(*bp.commandCondition)
+                    if(!bp.commandCondition.isEmpty())
                     {
-                        colored("if", mSummaryKeywordColor);
+                        colored(tr("cmdif"), mSummaryKeywordColor);
                         colored("(", mSummaryParenColor);
                         text(bp.commandCondition);
                         colored(",", mSummaryParenColor);
                         text(" ");
                     }
                     else
+                    {
+                        colored(tr("cmd"), mSummaryKeywordColor);
                         colored("(", mSummaryParenColor);
+                    }
                     colored(QString("\"%1\"").arg(bp.commandText), mSummaryStringColor);
                     colored(")", mSummaryParenColor);
                 }
@@ -519,10 +557,9 @@ void BreakpointsView::updateBreakpointsSlot()
 
         mRich.push_back(std::make_pair(std::move(richDisasm), std::move(richSummary)));
     }
-    if(bpmap.count)
+    BridgeFree(refList);
+    if(count)
     {
-        BridgeFree(bpmap.bp);
-
         auto sel = getInitialSelection();
         auto rows = getRowCount();
         if(sel >= rows)
@@ -531,7 +568,7 @@ void BreakpointsView::updateBreakpointsSlot()
     reloadData();
 }
 
-void BreakpointsView::disassembleAtSlot(dsint addr, dsint cip)
+void BreakpointsView::disassembleAtSlot(duint addr, duint cip)
 {
     Q_UNUSED(addr);
     mCip = cip;
@@ -545,10 +582,10 @@ void BreakpointsView::tokenizerConfigUpdatedSlot()
 
 void BreakpointsView::contextMenuSlot(const QPoint & pos)
 {
-    QMenu wMenu(this);
-    mMenuBuilder->build(&wMenu);
-    if(!wMenu.actions().isEmpty())
-        wMenu.exec(mapToGlobal(pos));
+    QMenu menu(this);
+    mMenuBuilder->build(&menu);
+    if(!menu.actions().isEmpty())
+        menu.exec(mapToGlobal(pos));
 }
 
 void BreakpointsView::followBreakpointSlot()
@@ -557,10 +594,16 @@ void BreakpointsView::followBreakpointSlot()
         return;
     auto & bp = selectedBp();
     if(bp.type == bp_exception || !bp.active)
+    {
+        GuiAddStatusBarMessage(tr("Cannot follow this breakpoint.\n").toUtf8().constData());
         return;
-    duint addr = bp.type == bp_dll ? DbgModBaseFromName(bp.mod) : bp.addr;
+    }
+    duint addr = bp.type == bp_dll ? DbgModBaseFromName(bp.module.toUtf8().constData()) : bp.addr;
     if(!DbgMemIsValidReadPtr(addr))
+    {
+        GuiAddStatusBarMessage(tr("Cannot follow this breakpoint.\n").toUtf8().constData());
         return;
+    }
     if(DbgFunctions()->MemIsCodePage(addr, false))
         DbgCmdExecDirect(QString("disasm %1").arg(ToPtrString(addr)));
     else
@@ -572,11 +615,12 @@ void BreakpointsView::followBreakpointSlot()
 
 void BreakpointsView::removeBreakpointSlot()
 {
+    GuiDisableUpdateScope s;
     for(int i : getSelection())
     {
         if(isValidBp(i))
         {
-            const BRIDGEBP & bp = selectedBp(i);
+            const auto & bp = selectedBp(i);
             Breakpoints::removeBP(bp);
         }
     }
@@ -584,6 +628,7 @@ void BreakpointsView::removeBreakpointSlot()
 
 void BreakpointsView::toggleBreakpointSlot()
 {
+    GuiDisableUpdateScope s;
     for(int i : getSelection())
         if(isValidBp(i) && selectedBp(i).active)
             Breakpoints::toggleBPByDisabling(selectedBp(i));
@@ -593,72 +638,20 @@ void BreakpointsView::editBreakpointSlot()
 {
     if(!isValidBp())
         return;
-    const BRIDGEBP & bp = selectedBp();
-    if(bp.type == bp_dll)
+    const auto & bp = selectedBp();
+    if(bp.type == bp_dll || bp.type == bp_exception)
     {
-        Breakpoints::editBP(bp_dll, bp.mod, this);
-    }
-    else if(bp.active || bp.type == bp_exception)
-    {
-        Breakpoints::editBP(bp.type, ToPtrString(bp.addr), this);
+        Breakpoints::editBP(bp.type, bp.module, bp.addr, this);
     }
     else
     {
-        QString addrText = QString().sprintf("\"%s\":$%X", bp.mod, bp.addr);
-        EditBreakpointDialog dialog(this, bp);
-        if(dialog.exec() != QDialog::Accepted)
-            return;
-        auto exec = [](const QString & command)
-        {
-            DbgCmdExecDirect(command.toUtf8().constData());
-        };
-        const BRIDGEBP & newBp = dialog.getBp();
-        switch(bp.type)
-        {
-        case bp_normal:
-            exec(QString("SetBreakpointName %1, \"%2\"").arg(addrText).arg(newBp.name));
-            exec(QString("SetBreakpointCondition %1, \"%2\"").arg(addrText).arg(newBp.breakCondition));
-            exec(QString("SetBreakpointLog %1, \"%2\"").arg(addrText).arg(newBp.logText));
-            exec(QString("SetBreakpointLogCondition %1, \"%2\"").arg(addrText).arg(newBp.logCondition));
-            exec(QString("SetBreakpointCommand %1, \"%2\"").arg(addrText).arg(newBp.commandText));
-            exec(QString("SetBreakpointCommandCondition %1, \"%2\"").arg(addrText).arg(newBp.commandCondition));
-            exec(QString("ResetBreakpointHitCount %1, %2").arg(addrText).arg(ToPtrString(newBp.hitCount)));
-            exec(QString("SetBreakpointFastResume %1, %2").arg(addrText).arg(newBp.fastResume));
-            exec(QString("SetBreakpointSilent %1, %2").arg(addrText).arg(newBp.silent));
-            exec(QString("SetBreakpointSingleshoot %1, %2").arg(addrText).arg(newBp.singleshoot));
-            break;
-        case bp_hardware:
-            exec(QString("SetHardwareBreakpointName %1, \"%2\"").arg(addrText).arg(newBp.name));
-            exec(QString("SetHardwareBreakpointCondition %1, \"%2\"").arg(addrText).arg(newBp.breakCondition));
-            exec(QString("SetHardwareBreakpointLog %1, \"%2\"").arg(addrText).arg(newBp.logText));
-            exec(QString("SetHardwareBreakpointLogCondition %1, \"%2\"").arg(addrText).arg(newBp.logCondition));
-            exec(QString("SetHardwareBreakpointCommand %1, \"%2\"").arg(addrText).arg(newBp.commandText));
-            exec(QString("SetHardwareBreakpointCommandCondition %1, \"%2\"").arg(addrText).arg(newBp.commandCondition));
-            exec(QString("ResetHardwareBreakpointHitCount %1, %2").arg(addrText).arg(ToPtrString(newBp.hitCount)));
-            exec(QString("SetHardwareBreakpointFastResume %1, %2").arg(addrText).arg(newBp.fastResume));
-            exec(QString("SetHardwareBreakpointSilent %1, %2").arg(addrText).arg(newBp.silent));
-            exec(QString("SetHardwareBreakpointSingleshoot %1, %2").arg(addrText).arg(newBp.singleshoot));
-            break;
-        case bp_memory:
-            exec(QString("SetMemoryBreakpointName %1, \"\"%2\"\"").arg(addrText).arg(newBp.name));
-            exec(QString("SetMemoryBreakpointCondition %1, \"%2\"").arg(addrText).arg(newBp.breakCondition));
-            exec(QString("SetMemoryBreakpointLog %1, \"%2\"").arg(addrText).arg(newBp.logText));
-            exec(QString("SetMemoryBreakpointLogCondition %1, \"%2\"").arg(addrText).arg(newBp.logCondition));
-            exec(QString("SetMemoryBreakpointCommand %1, \"%2\"").arg(addrText).arg(newBp.commandText));
-            exec(QString("SetMemoryBreakpointCommandCondition %1, \"%2\"").arg(addrText).arg(newBp.commandCondition));
-            exec(QString("ResetMemoryBreakpointHitCount %1, %2").arg(addrText).arg(ToPtrString(newBp.hitCount)));
-            exec(QString("SetMemoryBreakpointFastResume %1, %2").arg(addrText).arg(newBp.fastResume));
-            exec(QString("SetMemoryBreakpointSilent %1, %2").arg(addrText).arg(newBp.silent));
-            exec(QString("SetMemoryBreakpointSingleshoot %1, %2").arg(addrText).arg(newBp.singleshoot));
-            break;
-        default:
-            break;
-        }
+        Breakpoints::editBP(bp.type, bp.active ? QString() : bp.module, bp.addr, this);
     }
 }
 
 void BreakpointsView::resetHitCountBreakpointSlot()
 {
+    GuiDisableUpdateScope s;
     for(int i : getSelection())
     {
         if(!isValidBp(i))
@@ -675,16 +668,13 @@ void BreakpointsView::resetHitCountBreakpointSlot()
             case bp_memory:
                 return QString("ResetMemoryBreakpointHitCount %1").arg(ToPtrString(bp.addr));
             case bp_dll:
-                return QString("ResetLibrarianBreakpointHitCount \"%1\"").arg(bp.mod);
+                return QString("ResetLibrarianBreakpointHitCount \"%1\"").arg(bp.module);
             case bp_exception:
                 return QString("ResetExceptionBreakpointHitCount %1").arg(ToHexString(bp.addr));
             default:
                 return QString("invalid");
             }
         }());
-        QString cmd;
-
-        DbgCmdExec(cmd);
     }
 }
 
@@ -763,13 +753,124 @@ void BreakpointsView::removeAllBreakpointsSlot()
 void BreakpointsView::addDllBreakpointSlot()
 {
     QString fileName;
-    if(SimpleInputBox(this, tr("Enter the module name"), "", fileName, tr("Example: mydll.dll"), &DIcon("breakpoint.png")) && !fileName.isEmpty())
+    if(SimpleInputBox(this, tr("Enter the module name"), "", fileName, tr("Example: mydll.dll"), &DIcon("breakpoint")) && !fileName.isEmpty())
         DbgCmdExec(QString("bpdll \"%1\"").arg(fileName));
 }
 
 void BreakpointsView::addExceptionBreakpointSlot()
 {
     QString exception;
-    if(SimpleChoiceBox(this, tr("Enter the exception code"), "", mExceptionList, exception, true, tr("Example: EXCEPTION_ACCESS_VIOLATION"), &DIcon("breakpoint.png"), mExceptionMaxLength) && !exception.isEmpty())
+    if(SimpleChoiceBox(this, tr("Enter the exception code"), "", mExceptionList, exception, true, tr("Example: EXCEPTION_ACCESS_VIOLATION"), &DIcon("breakpoint"), mExceptionMaxLength) && !exception.isEmpty())
         DbgCmdExec((QString("SetExceptionBPX ") + exception));
+}
+
+static QString escape(QString data)
+{
+    return DbgCmdEscape(std::move(data));
+}
+
+void BreakpointsView::copyConditionalBreakpointSlot()
+{
+    const auto & bp = selectedBp();
+    const char* bpcnd;
+    const char* bplog;
+    const char* bpcmd;
+    const char* bplogcnd;
+    const char* bpcmdcnd;
+    const char* bpfastresume;
+    const char* bpsilent;
+    const char* bpsingleshoot;
+    switch(bp.type)
+    {
+    case bp_normal:
+        bpcnd = "bpcnd %1, \"%2\"";
+        bplog = "bpl %1, \"%2\"";
+        bpcmd = "SetBreakpointCommand %1, \"%2\"";
+        bplogcnd = "bplogcondition %1, \"%2\"";
+        bpcmdcnd = "SetBreakpointCommandCondition %1, \"%2\"";
+        bpfastresume = "SetBreakpointFastResume ";
+        bpsilent = "SetBreakpointSilent ";
+        bpsingleshoot = "SetBreakpointSingleshoot ";
+        break;
+    case bp_hardware:
+        bpcnd = "bphwcond %1, \"%2\"";
+        bplog = "bphwlog %1, \"%2\"";
+        bpcmd = "SetHardwareBreakpointCommand %1, \"%2\"";
+        bplogcnd = "bphwlogcondition %1, \"%2\"";
+        bpcmdcnd = "SetHardwareBreakpointCommandCondition %1, \"%2\"";
+        bpfastresume = "SetHardwareBreakpointFastResume ";
+        bpsilent = "SetHardwareBreakpointSilent ";
+        bpsingleshoot = "SetHardwareBreakpointSingleshoot ";
+        break;
+    case bp_memory:
+        bpcnd = "bpmcond %1, \"%2\"";
+        bplog = "bpml %1, \"%2\"";
+        bpcmd = "SetMemoryBreakpointCommand %1, \"%2\"";
+        bplogcnd = "bpmlogcondition %1, \"%2\"";
+        bpcmdcnd = "SetMemoryBreakpointCommandCondition %1, \"%2\"";
+        bpfastresume = "SetMemoryBreakpointFastResume ";
+        bpsilent = "SetMemoryBreakpointSilent ";
+        bpsingleshoot = "SetMemoryBreakpointSingleshoot ";
+        break;
+    case bp_dll:
+        bpcnd = "SetLibrarianBreakpointCondition %1, \"%2\"";
+        bplog = "SetLibrarianBreakpointLog %1, \"%2\"";
+        bpcmd = "SetLibrarianBreakpointCommand %1, \"%2\"";
+        bplogcnd = "SetLibrarianBreakpointLogCondition %1, \"%2\"";
+        bpcmdcnd = "SetLibrarianBreakpointCommandCondition %1, \"%2\"";
+        bpfastresume = "SetLibrarianBreakpointFastResume ";
+        bpsilent = "SetLibrarianBreakpointSilent ";
+        bpsingleshoot = "SetLibrarianBreakpointSingleshoot ";
+        break;
+    case bp_exception:
+        bpcnd = "SetExceptionBreakpointCondition %1, \"%2\"";
+        bplog = "SetExceptionBreakpointLog %1, \"%2\"";
+        bpcmd = "SetExceptionBreakpointCommand %1, \"%2\"";
+        bplogcnd = "SetExceptionBreakpointLogCondition %1, \"%2\"";
+        bpcmdcnd = "SetExceptionBreakpointCommandCondition %1, \"%2\"";
+        bpfastresume = "SetExceptionBreakpointFastResume ";
+        bpsilent = "SetExceptionBreakpointSilent ";
+        bpsingleshoot = "SetExceptionBreakpointSingleshoot ";
+        break;
+    default:
+        return;
+    }
+    QString text;
+    QString addr;
+    if(bp.type != bp_dll)
+        addr = ToPtrString(bp.addr);
+    else
+        addr = '"' + escape(bp.module) + '"';
+    QTextStream s(&text, QIODevice::WriteOnly);
+    s << QString(bpcnd).arg(addr).arg(escape(bp.breakCondition)) << "\r\n";
+    s << QString(bplog).arg(addr).arg(escape(bp.logText)) << "\r\n";
+    s << QString(bplogcnd).arg(addr).arg(escape(bp.logCondition)) << "\r\n";
+    s << QString(bpcmd).arg(addr).arg(escape(bp.commandText)) << "\r\n";
+    s << QString(bpcmdcnd).arg(addr).arg(escape(bp.commandCondition)) << "\r\n";
+    addr += ", ";
+    s << bpfastresume << addr << (bp.fastResume ? '1' : '0') << "\r\n";
+    s << bpsilent << addr << (bp.silent ? '1' : '0') << "\r\n";
+    s << bpsingleshoot << addr << (bp.singleshoot ? '1' : '0') << "\r\n";
+    Bridge::CopyToClipboard(text);
+}
+
+void BreakpointsView::pasteConditionalBreakpointSlot()
+{
+    //TO DO perform a validation
+    QClipboard* clipboard = QApplication::clipboard();
+    QString text = clipboard->text();
+    QRegExp regexp(ArchValue("(\\w+) ([\\dA-F]{8}),", "(\\w+) ([\\dA-F]{16}),"), Qt::CaseInsensitive);
+
+    GuiDisableUpdateScope s;
+    for(int i : getSelection())
+    {
+        if(!isValidBp(i))
+            continue;
+        auto & bp = selectedBp(i);
+        QString text1 = text.replace(regexp, "\\1 " + ToPtrString(bp.addr) + ",");
+        QList<QString> cmds;
+        cmds = text1.split("\r\n");
+        for(const auto & j : cmds)
+            DbgCmdExecDirect(j.toUtf8().constData());
+    }
 }

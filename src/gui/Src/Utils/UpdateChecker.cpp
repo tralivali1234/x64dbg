@@ -18,6 +18,7 @@ UpdateChecker::UpdateChecker(QWidget* parent)
 
 void UpdateChecker::checkForUpdates()
 {
+    GuiAddStatusBarMessage(tr("Checking for updates...\n").toUtf8().constData());
     get(QNetworkRequest(QUrl("https://api.github.com/repos/x64dbg/x64dbg/releases/latest")));
 }
 
@@ -40,7 +41,7 @@ void UpdateChecker::finishedSlot(QNetworkReply* reply)
         return;
     }
     QRegExp regUrl("\"browser_download_url\": ?\"([^\"]+)\"");
-    auto url = regUrl.indexIn(json) >= 0 ? regUrl.cap(1) : "http://releases.x64dbg.com";
+    auto url = regUrl.indexIn(json) >= 0 ? regUrl.cap(1) : "https://releases.x64dbg.com";
     auto server = serverTime.date();
     auto build = GetCompileDate();
     QString info;

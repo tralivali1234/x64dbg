@@ -1,5 +1,4 @@
-#ifndef SOURCEVIEWERMANAGER_H
-#define SOURCEVIEWERMANAGER_H
+#pragma once
 
 #include <QTabWidget>
 #include <QPushButton>
@@ -10,7 +9,7 @@ class SourceViewerManager : public QTabWidget
 {
     Q_OBJECT
 public:
-    explicit SourceViewerManager(QWidget* parent = 0);
+    explicit SourceViewerManager(QWidget* parent = nullptr);
 
 public slots:
     void loadSourceFile(QString path, duint addr);
@@ -21,5 +20,3 @@ public slots:
 private:
     QPushButton* mCloseAllTabs;
 };
-
-#endif // SOURCEVIEWERMANAGER_H

@@ -1,5 +1,4 @@
-#ifndef OPENVIEWSWINDOW_H
-#define OPENVIEWSWINDOW_H
+#pragma once
 
 // stolen from http://code.qt.io/cgit/qt-creator/qt-creator.git/tree/src/plugins/coreplugin/editormanager/openeditorswindow.h
 
@@ -58,7 +57,7 @@ private:
     class OpenViewsTreeWidget : public QTreeWidget
     {
     public:
-        explicit OpenViewsTreeWidget(QWidget* parent = 0) : QTreeWidget(parent) {}
+        explicit OpenViewsTreeWidget(QWidget* parent = nullptr) : QTreeWidget(parent) {}
         ~OpenViewsTreeWidget() {}
         QSize sizeHint() const;
     };
@@ -67,5 +66,3 @@ private:
     MultiItemsDataProvider* mDataProvider = nullptr;
     bool mShowIcon;
 };
-
-#endif

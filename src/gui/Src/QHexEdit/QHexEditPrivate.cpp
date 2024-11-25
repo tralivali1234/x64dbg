@@ -687,6 +687,8 @@ void QHexEditPrivate::mousePressEvent(QMouseEvent* event)
 void QHexEditPrivate::paintEvent(QPaintEvent* event)
 {
     QPainter painter(this);
+    painter.setFont(font());
+    painter.setLayoutDirection(Qt::LayoutDirectionAuto);
 
     painter.fillRect(event->rect(), _backgroundColor);
 

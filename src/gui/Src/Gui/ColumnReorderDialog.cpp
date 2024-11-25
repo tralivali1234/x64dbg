@@ -10,7 +10,7 @@ ColumnReorderDialog::ColumnReorderDialog(AbstractTableView* parent) :
 {
     ui->setupUi(this);
     setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint | Qt::MSWindowsFixedSizeDialogHint);
-    for(int j = 0; j < parent->getColumnCount(); j++)
+    for(duint j = 0; j < parent->getColumnCount(); j++)
     {
         int i = parent->mColumnOrder[j];
         if(parent->getColumnHidden(i))
@@ -46,7 +46,7 @@ void ColumnReorderDialog::on_okButton_clicked()
     if(ui->listDisplayed->count() == 0)
     {
         QMessageBox msg(QMessageBox::Warning, tr("Error"), tr("There isn't anything to display yet!"));
-        msg.setWindowIcon(DIcon("compile-error.png"));
+        msg.setWindowIcon(DIcon("compile-error"));
         msg.exec();
         return;
     }
@@ -62,6 +62,7 @@ void ColumnReorderDialog::on_okButton_clicked()
         mParent->mColumnOrder[i] = col;
         mParent->setColumnHidden(col, true);
     }
+    mParent->reloadData();
     this->done(QDialog::Accepted);
 }
 

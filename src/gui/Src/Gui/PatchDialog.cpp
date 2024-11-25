@@ -13,7 +13,7 @@ PatchDialog::PatchDialog(QWidget* parent) :
     ui(new Ui::PatchDialog)
 {
     ui->setupUi(this);
-    setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint | Qt::MSWindowsFixedSizeDialogHint);
+    setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
     setModal(false); //non-modal window
 
     connect(Bridge::getBridge(), SIGNAL(updatePatches()), this, SLOT(updatePatches()));
@@ -216,8 +216,8 @@ void PatchDialog::groupPrevious()
     mGroupSelector->setPreviousEnabled(hasPreviousGroup(curPatchList, group));
     mGroupSelector->setNextEnabled(hasNextGroup(curPatchList, group));
     mGroupSelector->showNormal();
-    DbgCmdExecDirect(QString("disasm " + addrText).toUtf8().constData());
-    DbgCmdExecDirect(QString("dump " + addrText).toUtf8().constData());
+    DbgCmdExecDirect(QString("disasm " + addrText));
+    DbgCmdExecDirect(QString("dump " + addrText));
 }
 
 void PatchDialog::groupNext()
@@ -241,8 +241,8 @@ void PatchDialog::groupNext()
     mGroupSelector->setPreviousEnabled(hasPreviousGroup(curPatchList, group));
     mGroupSelector->setNextEnabled(hasNextGroup(curPatchList, group));
     mGroupSelector->showNormal();
-    DbgCmdExecDirect(QString("disasm " + addrText).toUtf8().constData());
-    DbgCmdExecDirect(QString("dump " + addrText).toUtf8().constData());
+    DbgCmdExecDirect(QString("disasm " + addrText));
+    DbgCmdExecDirect(QString("dump " + addrText));
 }
 
 void PatchDialog::on_listModules_itemSelectionChanged()
@@ -401,8 +401,8 @@ void PatchDialog::on_listPatches_itemSelectionChanged()
     if(!groupStart)
         return;
     QString addrText = ToPtrString(groupStart);
-    DbgCmdExecDirect(QString("disasm " + addrText).toUtf8().constData());
-    DbgCmdExecDirect(QString("dump " + addrText).toUtf8().constData());
+    DbgCmdExecDirect(QString("disasm " + addrText));
+    DbgCmdExecDirect(QString("dump " + addrText));
 }
 
 void PatchDialog::on_btnPickGroups_clicked()
@@ -426,8 +426,8 @@ void PatchDialog::on_btnPickGroups_clicked()
     mGroupSelector->setPreviousEnabled(hasPreviousGroup(curPatchList, group));
     mGroupSelector->setNextEnabled(hasNextGroup(curPatchList, group));
     mGroupSelector->show();
-    DbgCmdExecDirect(QString("disasm " + addrText).toUtf8().constData());
-    DbgCmdExecDirect(QString("dump " + addrText).toUtf8().constData());
+    DbgCmdExecDirect(QString("disasm " + addrText));
+    DbgCmdExecDirect(QString("dump " + addrText));
 }
 
 void PatchDialog::on_btnPatchFile_clicked()
@@ -505,6 +505,9 @@ void PatchDialog::on_btnImport_clicked()
     QList<QPair<DBGPATCHINFO, IMPORTSTATUS>> patchList;
     DBGPATCHINFO curPatch;
 
+    if(!filenamelist.size())
+        return; // No files are selected, don't show the "No patches to apply in the current process." dialog.
+
     for(const auto & filename1 : filenamelist)
     {
         if(!filename1.length())
@@ -577,7 +580,7 @@ void PatchDialog::on_btnImport_clicked()
     if(bAlreadyDone)
     {
         QMessageBox msg(QMessageBox::Question, tr("Question"), tr("Some patches are already applied.\n\nDo you want to remove these patches?"), QMessageBox::Yes | QMessageBox::No);
-        msg.setWindowIcon(DIcon("question.png"));
+        msg.setWindowIcon(DIcon("question"));
         msg.setParent(this, Qt::Dialog);
         msg.setWindowFlags(msg.windowFlags() & (~Qt::WindowContextHelpButtonHint));
         if(msg.exec() == QMessageBox::Yes)
@@ -588,7 +591,7 @@ void PatchDialog::on_btnImport_clicked()
     if(bBadOriginal)
     {
         QMessageBox msg(QMessageBox::Question, tr("Question"), tr("Some bytes do not match the original in the patch file.\n\nDo you want to apply these patches anyway?"), QMessageBox::Yes | QMessageBox::No);
-        msg.setWindowIcon(DIcon("question.png"));
+        msg.setWindowIcon(DIcon("question"));
         msg.setParent(this, Qt::Dialog);
         msg.setWindowFlags(msg.windowFlags() & (~Qt::WindowContextHelpButtonHint));
         if(msg.exec() == QMessageBox::Yes)

@@ -1,5 +1,4 @@
-#ifndef MAIN_H
-#define MAIN_H
+#pragma once
 
 #include <QApplication>
 #include <QAbstractEventDispatcher>
@@ -11,6 +10,7 @@
 
 class MyApplication : public QApplication
 {
+    Q_OBJECT
 public:
     MyApplication(int & argc, char** argv);
     bool notify(QObject* receiver, QEvent* event) Q_DECL_OVERRIDE;
@@ -21,7 +21,7 @@ public:
 };
 
 int main(int argc, char* argv[]);
-extern char currentLocale[MAX_SETTING_SIZE];
+extern char gCurrentLocale[MAX_SETTING_SIZE];
 
 struct TranslatedStringStorage
 {
@@ -43,5 +43,3 @@ public:
     }
 };
 #endif // QT_VERSION
-
-#endif // MAIN_H

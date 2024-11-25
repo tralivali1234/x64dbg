@@ -1,5 +1,5 @@
-#ifndef SYMBOLAUTOCOMPLETEMODEL
-#define SYMBOLAUTOCOMPLETEMODEL
+#pragma once
+
 #include <functional>
 #include <QAbstractItemModel>
 #include <QRegularExpression>
@@ -9,7 +9,7 @@ class SymbolAutoCompleteModel : public QAbstractItemModel
 {
     Q_OBJECT
 public:
-    SymbolAutoCompleteModel(std::function<QString()> getTextProc, QObject* parent = 0);
+    SymbolAutoCompleteModel(std::function<QString()> getTextProc, QObject* parent = nullptr);
 
     virtual QVariant data(const QModelIndex & index, int role) const override;
     virtual QModelIndex index(int row, int column, const QModelIndex & parent) const override;
@@ -29,4 +29,3 @@ private:
     mutable int lastAutocompleteCount;
     void update() const;
 };
-#endif //SYMBOLAUTOCOMPLETEMODEL

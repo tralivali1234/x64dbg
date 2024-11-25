@@ -1,26 +1,27 @@
-#ifndef CPUSTACK_H
-#define CPUSTACK_H
+#pragma once
 
 #include "HexDump.h"
 
 //forward declaration
 class CPUMultiDump;
 class GotoDialog;
+class CommonActions;
 
 class CPUStack : public HexDump
 {
     Q_OBJECT
 public:
-    explicit CPUStack(CPUMultiDump* multiDump, QWidget* parent = 0);
+    explicit CPUStack(CPUMultiDump* multiDump, QWidget* parent = nullptr);
 
     // Configuration
-    virtual void updateColors();
-    virtual void updateFonts();
+    void updateColors() override;
+    void updateFonts() override;
 
-    void getColumnRichText(int col, dsint rva, RichTextPainter::List & richText) override;
-    QString paintContent(QPainter* painter, dsint rowBase, int rowOffset, int col, int x, int y, int w, int h) override;
-    void contextMenuEvent(QContextMenuEvent* event);
-    void mouseDoubleClickEvent(QMouseEvent* event);
+    void getColumnRichText(duint col, duint rva, RichTextPainter::List & richText) override;
+    QString paintContent(QPainter* painter, duint row, duint col, int x, int y, int w, int h) override;
+    void contextMenuEvent(QContextMenuEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
+    void wheelEvent(QWheelEvent* event) override;
     void setupContextMenu();
     void updateFreezeStackAction();
 
@@ -28,8 +29,6 @@ signals:
     void displayReferencesWidget();
 
 public slots:
-    void pushSlot();
-    void popSlot();
     void stackDumpAt(duint addr, duint csp);
     void gotoCspSlot();
     void gotoCbpSlot();
@@ -41,28 +40,11 @@ public slots:
     void selectionSet(const SELECTIONDATA* selection);
     void selectionUpdatedSlot();
     void followDisasmSlot();
-    void followDumpPtrSlot();
-    void followinDumpNSlot();
     void followStackSlot();
-    void watchDataSlot();
     void binaryEditSlot();
     void binaryFillSlot();
     void binaryCopySlot();
     void binaryPasteSlot();
-    void memoryAccessSingleshootSlot();
-    void memoryAccessRestoreSlot();
-    void memoryWriteSingleshootSlot();
-    void memoryWriteRestoreSlot();
-    void memoryRemoveSlot();
-    void hardwareAccess1Slot();
-    void hardwareAccess2Slot();
-    void hardwareAccess4Slot();
-    void hardwareAccess8Slot();
-    void hardwareWrite1Slot();
-    void hardwareWrite2Slot();
-    void hardwareWrite4Slot();
-    void hardwareWrite8Slot();
-    void hardwareRemoveSlot();
     void findPattern();
     void binaryPasteIgnoreSizeSlot();
     void undoSelectionSlot();
@@ -70,18 +52,18 @@ public slots:
     void realignSlot();
     void freezeStackSlot();
     void dbgStateChangedSlot(DBGSTATE state);
-    void followInMemoryMapSlot();
-    void followInDumpSlot();
+    void disasmSelectionChanged(duint parVA);
     void updateSlot();
+    void copyPtrColumnSlot();
+    void copyCommentsColumnSlot();
 
 private:
-    duint mCsp;
-    bool bStackFrozen;
+    duint mCsp = 0;
+    bool bStackFrozen = false;
 
     QAction* mFreezeStack;
     QAction* mFollowStack;
     QAction* mFollowDisasm;
-    QList<QAction*> mFollowInDumpActions;
     QMenu* mPluginMenu;
 
     GotoDialog* mGoto;
@@ -97,9 +79,8 @@ private:
     };
 
     MenuBuilder* mMenuBuilder;
+    CommonActions* mCommonActions;
 
     std::vector<CPUCallStack> mCallstack;
-    static int CPUStack::getCurrentFrame(const std::vector<CPUStack::CPUCallStack> & mCallstack, duint wVA);
+    static int CPUStack::getCurrentFrame(const std::vector<CPUStack::CPUCallStack> & mCallstack, duint va);
 };
-
-#endif // CPUSTACK_H

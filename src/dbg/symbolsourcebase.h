@@ -24,6 +24,29 @@ static ForwardIt binary_find(ForwardIt first, ForwardIt last, const T & value, C
 struct SymbolInfoGui
 {
     virtual void convertToGuiSymbol(duint base, SYMBOLINFO* info) const = 0;
+
+    void copyToGuiSymbol(duint modbase, SYMBOLINFO* info) const
+    {
+        convertToGuiSymbol(modbase, info);
+
+        if(!info->freeDecorated)
+        {
+            const char* name = info->decoratedSymbol;
+            size_t len = strlen(name);
+            info->decoratedSymbol = (char*)BridgeAlloc(len + 1);
+            memcpy(info->decoratedSymbol, name, len + 1);
+            info->freeDecorated = true;
+        }
+
+        if(!info->freeUndecorated)
+        {
+            const char* name = info->undecoratedSymbol;
+            size_t len = strlen(name);
+            info->undecoratedSymbol = (char*)BridgeAlloc(len + 1);
+            memcpy(info->undecoratedSymbol, name, len + 1);
+            info->freeUndecorated = true;
+        }
+    }
 };
 
 struct SymbolInfo : SymbolInfoGui
@@ -124,7 +147,12 @@ public:
 
     virtual bool cancelLoading()
     {
-        return false;
+        return false; // Stub
+    }
+
+    virtual void waitUntilLoaded()
+    {
+        // Stub
     }
 
     // Get the symbol at the specified address, will return false if not found.
@@ -140,7 +168,7 @@ public:
     }
 
     // only call if isOpen && !isLoading
-    virtual void enumSymbols(const CbEnumSymbol & cbEnum)
+    virtual void enumSymbols(const CbEnumSymbol & cbEnum, duint beginRva = 0, duint endRva = -1)
     {
         // Stub
     }

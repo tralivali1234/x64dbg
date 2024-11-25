@@ -13,7 +13,7 @@
 #include "pdbdiafile.h"
 #include "stringutils.h"
 #include "console.h"
-#include "symbolundecorator.h"
+#include "LLVMDemangle/LLVMDemangle.h"
 
 //Taken from: https://msdn.microsoft.com/en-us/library/ms752876(v=vs.85).aspx
 class FileStream : public IStream
@@ -41,10 +41,14 @@ public:
         if(hFile == INVALID_HANDLE_VALUE)
             return HRESULT_FROM_WIN32(GetLastError());
 
-        *ppStream = new FileStream(hFile);
-
-        if(*ppStream == NULL)
+        try
+        {
+            *ppStream = new FileStream(hFile);
+        }
+        catch(const std::bad_alloc &)
+        {
             CloseHandle(hFile);
+        }
 
         return S_OK;
     }
@@ -199,9 +203,6 @@ bool PDBDiaFile::open(const wchar_t* file, uint64_t loadAddress, DiaValidationDa
         return false;
     }
 
-    wchar_t fileExt[MAX_PATH] = { 0 };
-    wchar_t fileDir[MAX_PATH] = { 0 };
-
     HRESULT hr = REGDB_E_CLASSNOTREG;
     hr = NoRegCoCreate(L"msdia140.dll", __uuidof(DiaSource), __uuidof(IDiaDataSource), (LPVOID*)&m_dataSource);
     if(testError(hr) || m_dataSource == nullptr)
@@ -214,42 +215,32 @@ bool PDBDiaFile::open(const wchar_t* file, uint64_t loadAddress, DiaValidationDa
         return false;
     }
 
-    _wsplitpath_s(file, NULL, 0, fileDir, MAX_PATH, NULL, 0, fileExt, MAX_PATH);
-
-    if(_wcsicmp(fileExt, L".pdb") == 0)
+    hr = FileStream::OpenFile(file, &m_stream, false);
+    if(testError(hr))
     {
-        hr = FileStream::OpenFile(file, &m_stream, false);
-        if(testError(hr))
-        {
-            GuiSymbolLogAdd("Unable to open PDB file.\n");
-            return false;
-        }
-        /*std::vector<unsigned char> pdbData;
-        if (!FileHelper::ReadAllData(StringUtils::Utf16ToUtf8(file), pdbData))
-        {
-            GuiSymbolLogAdd("Unable to open PDB file.\n");
-            return false;
-        }
-        m_stream = SHCreateMemStream(pdbData.data(), pdbData.size());*/
+        GuiSymbolLogAdd("Unable to open PDB file.\n");
+        return false;
+    }
+    /*std::vector<unsigned char> pdbData;
+    if (!FileHelper::ReadAllData(StringUtils::Utf16ToUtf8(file), pdbData))
+    {
+        GuiSymbolLogAdd("Unable to open PDB file.\n");
+        return false;
+    }
+    m_stream = SHCreateMemStream(pdbData.data(), pdbData.size());*/
 
-        if(validationData != nullptr)
+    if(validationData != nullptr)
+    {
+        hr = m_dataSource->loadDataFromIStream(m_stream);
+        if(hr == E_PDB_FORMAT)
         {
-            hr = m_dataSource->loadDataFromIStream(m_stream);
-            if(hr == E_PDB_FORMAT)
-            {
-                GuiSymbolLogAdd("PDB uses an obsolete format.\n");
-                return false;
-            }
-        }
-        else
-        {
-            hr = m_dataSource->loadDataFromIStream(m_stream);
+            GuiSymbolLogAdd("PDB uses an obsolete format.\n");
+            return false;
         }
     }
     else
     {
-        // NOTE: Unsupported use with IStream.
-        hr = m_dataSource->loadDataForExe(file, fileDir, nullptr);
+        hr = m_dataSource->loadDataFromIStream(m_stream);
     }
 
     if(testError(hr))
@@ -463,7 +454,7 @@ bool PDBDiaFile::enumerateLineNumbers(uint32_t rva, uint32_t size, std::vector<D
     for(ULONG step = 0; step < steps; step++)
     {
         ULONG begin = step * bucket;
-        ULONG end = min(lineCount, (step + 1) * bucket);
+        ULONG end = min((ULONG)lineCount, (step + 1) * bucket);
 
         if(cancelled)
             return false;
@@ -553,24 +544,6 @@ bool PDBDiaFile::enumerateLexicalHierarchy(const Query_t & query)
     uint32_t scopeId = getSymbolId(globalScope);
     context.visited.insert(scopeId);
 
-    // Enumerate compilands.
-    {
-        CComPtr<IDiaEnumSymbols> enumSymbols;
-
-        hr = globalScope->findChildren(SymTagCompiland, nullptr, nsNone, &enumSymbols);
-        if(hr == S_OK)
-        {
-            while((hr = enumSymbols->Next(1, &symbol, &celt)) == S_OK && celt == 1)
-            {
-                CComPtr<IDiaSymbol> sym(symbol);
-                if(!enumerateCompilandScope(sym, context))
-                {
-                    return false;
-                }
-            }
-        }
-    }
-
     // Enumerate publics.
     {
         CComPtr<IDiaEnumSymbols> enumSymbols;
@@ -629,6 +602,24 @@ bool PDBDiaFile::enumerateLexicalHierarchy(const Query_t & query)
                     {
                         return false;
                     }
+                }
+            }
+        }
+    }
+
+    // Enumerate compilands.
+    {
+        CComPtr<IDiaEnumSymbols> enumSymbols;
+
+        hr = globalScope->findChildren(SymTagCompiland, nullptr, nsNone, &enumSymbols);
+        if(hr == S_OK)
+        {
+            while((hr = enumSymbols->Next(1, &symbol, &celt)) == S_OK && celt == 1)
+            {
+                CComPtr<IDiaSymbol> sym(symbol);
+                if(!enumerateCompilandScope(sym, context))
+                {
+                    return false;
                 }
             }
         }
@@ -1028,7 +1019,10 @@ bool PDBDiaFile::convertSymbolInfo(IDiaSymbol* symbol, DiaSymbol_t & symbolInfo,
 
     if(context.collectUndecoratedNames && !symbolInfo.name.empty() && (symbolInfo.name.at(0) == '?' || symbolInfo.name.at(0) == '_' || symbolInfo.name.at(0) == '@'))
     {
-        undecorateName(symbolInfo.name, symbolInfo.undecoratedName);
+        auto demangled = LLVMDemangle(symbolInfo.name.c_str());
+        if(demangled && symbolInfo.name.compare(demangled) != 0)
+            symbolInfo.undecoratedName = demangled;
+        LLVMDemangleFree(demangled);
     }
     else
     {

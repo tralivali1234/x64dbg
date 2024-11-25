@@ -1,11 +1,10 @@
-#ifndef SOURCEVIEW_H
-#define SOURCEVIEW_H
+#pragma once
 
 #include <QWidget>
 #include <AbstractStdTable.h>
-#include "BreakpointMenu.h"
 
 class FileLines;
+class CommonActions;
 
 class SourceView : public AbstractStdTable
 {
@@ -14,9 +13,10 @@ public:
     SourceView(QString path, duint addr, QWidget* parent = nullptr);
     ~SourceView();
 
-    QString getCellContent(int r, int c) override;
-    bool isValidIndex(int r, int c) override;
-    void sortRows(int column, bool ascending) override;
+    QString getCellContent(duint row, duint column) override;
+    duint getCellUserdata(duint row, duint column) override;
+    bool isValidIndex(duint row, duint column) override;
+    void sortRows(duint column, bool ascending) override;
     void prepareData() override;
 
     QString getSourcePath();
@@ -25,16 +25,13 @@ public:
 
 private slots:
     void contextMenuSlot(const QPoint & pos);
-    void followDisassemblerSlot();
-    void followDumpSlot();
-    void toggleBookmarkSlot();
     void gotoLineSlot();
     void openSourceFileSlot();
     void showInDirectorySlot();
 
 private:
     MenuBuilder* mMenuBuilder = nullptr;
-    BreakpointMenu* mBreakpointMenu = nullptr;
+    CommonActions* mCommonActions = nullptr;
     QString mSourcePath;
     duint mModBase;
     int mTabSize = 4; //TODO: make customizable?
@@ -68,5 +65,3 @@ private:
     void parseLine(size_t index, LineData & line);
     duint addrFromIndex(size_t index);
 };
-
-#endif // SOURCEVIEW_H

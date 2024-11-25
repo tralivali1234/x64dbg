@@ -1,12 +1,12 @@
 #include "SourceView.h"
 #include <QFileDialog>
-#include <QMessageBox>
 #include <QDesktopServices>
 #include <QProcess>
 #include <QInputDialog>
 #include <memory>
 #include "FileLines.h"
 #include "Bridge.h"
+#include "CommonActions.h"
 
 SourceView::SourceView(QString path, duint addr, QWidget* parent)
     : AbstractStdTable(parent),
@@ -27,8 +27,8 @@ SourceView::SourceView(QString path, duint addr, QWidget* parent)
     setupContextMenu();
 
     connect(this, SIGNAL(contextMenuSignal(QPoint)), this, SLOT(contextMenuSlot(QPoint)));
-    connect(this, SIGNAL(doubleClickedSignal()), this, SLOT(followDisassemblerSlot()));
-    connect(this, SIGNAL(enterPressedSignal()), this, SLOT(followDisassemblerSlot()));
+    connect(this, SIGNAL(doubleClickedSignal()), mCommonActions, SLOT(followDisassemblySlot()));
+    connect(this, SIGNAL(enterPressedSignal()), mCommonActions, SLOT(followDisassemblySlot()));
     connect(Bridge::getBridge(), SIGNAL(updateDisassembly()), this, SLOT(reloadData()));
 
     Initialize();
@@ -41,12 +41,12 @@ SourceView::~SourceView()
     clear();
 }
 
-QString SourceView::getCellContent(int r, int c)
+QString SourceView::getCellContent(duint row, duint column)
 {
-    if(!isValidIndex(r, c))
+    if(!isValidIndex(row, column))
         return QString();
-    LineData & line = mLines.at(r - mPrepareTableOffset);
-    switch(c)
+    LineData & line = mLines.at(row - mPrepareTableOffset);
+    switch(column)
     {
     case ColAddr:
         return line.addr ? ToPtrString(line.addr) : QString();
@@ -59,16 +59,32 @@ QString SourceView::getCellContent(int r, int c)
     return "INVALID";
 }
 
-bool SourceView::isValidIndex(int r, int c)
+duint SourceView::getCellUserdata(duint row, duint column)
+{
+    if(!isValidIndex(row, column))
+        return 0;
+    LineData & line = mLines.at(row - mPrepareTableOffset);
+    switch(column)
+    {
+    case ColAddr:
+        return line.addr;
+    case ColLine:
+        return line.index + 1;
+    default:
+        return 0;
+    }
+}
+
+bool SourceView::isValidIndex(duint row, duint column)
 {
     if(!mFileLines)
         return false;
-    if(c < ColAddr || c > ColCode)
+    if(column < ColAddr || column > ColCode)
         return false;
-    return r >= 0 && size_t(r) < mFileLines->size();
+    return row >= 0 && size_t(row) < mFileLines->size();
 }
 
-void SourceView::sortRows(int column, bool ascending)
+void SourceView::sortRows(duint column, bool ascending)
 {
     Q_UNUSED(column);
     Q_UNUSED(ascending);
@@ -83,7 +99,7 @@ void SourceView::prepareData()
         mPrepareTableOffset = getTableOffset();
         mLines.clear();
         mLines.resize(lines);
-        for(auto i = 0; i < lines; i++)
+        for(duint i = 0; i < lines; i++)
             parseLine(mPrepareTableOffset + i, mLines[i]);
     }
 }
@@ -112,41 +128,9 @@ QString SourceView::getSourcePath()
 
 void SourceView::contextMenuSlot(const QPoint & pos)
 {
-    QMenu wMenu(this);
-    mMenuBuilder->build(&wMenu);
-    wMenu.exec(mapToGlobal(pos));
-}
-
-void SourceView::followDisassemblerSlot()
-{
-    duint addr = addrFromIndex(getInitialSelection());
-    if(!DbgMemIsValidReadPtr(addr))
-        return;
-    DbgCmdExec(QString("disasm %1").arg(ToPtrString(addr)).toUtf8().constData());
-}
-
-void SourceView::followDumpSlot()
-{
-    duint addr = addrFromIndex(getInitialSelection());
-    if(!DbgMemIsValidReadPtr(addr))
-        return;
-    DbgCmdExec(QString("dump %1").arg(ToPtrString(addr)).toUtf8().constData());
-}
-
-void SourceView::toggleBookmarkSlot()
-{
-    duint addr = addrFromIndex(getInitialSelection());
-    if(!DbgMemIsValidReadPtr(addr))
-        return;
-
-    bool result;
-    if(DbgGetBookmarkAt(addr))
-        result = DbgSetBookmarkAt(addr, false);
-    else
-        result = DbgSetBookmarkAt(addr, true);
-    if(!result)
-        SimpleErrorBox(this, tr("Error!"), tr("DbgSetBookmarkAt failed!"));
-    GuiUpdateAllViews();
+    QMenu menu(this);
+    mMenuBuilder->build(&menu);
+    menu.exec(mapToGlobal(pos));
 }
 
 void SourceView::gotoLineSlot()
@@ -176,29 +160,20 @@ void SourceView::showInDirectorySlot()
 void SourceView::setupContextMenu()
 {
     mMenuBuilder = new MenuBuilder(this);
-    mMenuBuilder->addAction(makeAction(DIcon(ArchValue("processor32.png", "processor64.png")), tr("&Follow in Disassembler"), SLOT(followDisassemblerSlot())), [this](QMenu*)
-    {
-        return DbgMemIsValidReadPtr(addrFromIndex(getInitialSelection()));
-    });
-    mMenuBuilder->addAction(makeAction(DIcon("dump.png"), tr("Follow in &Dump"), SLOT(followDumpSlot())), [this](QMenu*)
-    {
-        return DbgMemIsValidReadPtr(addrFromIndex(getInitialSelection()));
-    });
-    mMenuBuilder->addSeparator();
-    mBreakpointMenu = new BreakpointMenu(this, getActionHelperFuncs(), [this]()
+    mCommonActions = new CommonActions(this, getActionHelperFuncs(), [this]()
     {
         return addrFromIndex(getInitialSelection());
     });
-    mBreakpointMenu->build(mMenuBuilder);
-    mMenuBuilder->addAction(makeShortcutAction(DIcon("bookmark_toggle.png"), tr("Toggle Bookmark"), SLOT(toggleBookmarkSlot()), "ActionToggleBookmark"));
+    mCommonActions->build(mMenuBuilder, CommonActions::ActionDisasm | CommonActions::ActionDump | CommonActions::ActionBreakpoint | CommonActions::ActionLabel | CommonActions::ActionComment
+                          | CommonActions::ActionBookmark | CommonActions::ActionMemoryMap | CommonActions::ActionNewOrigin | CommonActions::ActionNewThread);
     mMenuBuilder->addSeparator();
-    mMenuBuilder->addAction(makeShortcutAction(DIcon("geolocation-goto.png"), tr("Go to line"), SLOT(gotoLineSlot()), "ActionGotoExpression"));
-    mMenuBuilder->addAction(makeAction(DIcon("source.png"), tr("Open source file"), SLOT(openSourceFileSlot())));
-    mMenuBuilder->addAction(makeAction(DIcon("source_show_in_folder.png"), tr("Show source file in directory"), SLOT(showInDirectorySlot())));
+    mMenuBuilder->addAction(makeShortcutAction(DIcon("geolocation-goto"), tr("Go to line"), SLOT(gotoLineSlot()), "ActionGotoExpression"));
+    mMenuBuilder->addAction(makeAction(DIcon("source"), tr("Open source file"), SLOT(openSourceFileSlot())));
+    mMenuBuilder->addAction(makeAction(DIcon("source_show_in_folder"), tr("Show source file in directory"), SLOT(showInDirectorySlot())));
     mMenuBuilder->addSeparator();
     MenuBuilder* copyMenu = new MenuBuilder(this);
     setupCopyColumnMenu(copyMenu);
-    mMenuBuilder->addMenu(makeMenu(DIcon("copy.png"), tr("&Copy")), copyMenu);
+    mMenuBuilder->addMenu(makeMenu(DIcon("copy"), tr("&Copy")), copyMenu);
     mMenuBuilder->loadFromConfig();
 }
 
@@ -244,14 +219,14 @@ void SourceView::loadFile()
     mFileLines->open(mSourcePath.toStdWString().c_str());
     if(!mFileLines->isopen())
     {
-        QMessageBox::warning(this, "Error", "Failed to open file!");
+        SimpleWarningBox(this, tr("Error"), tr("Failed to open file!"));
         delete mFileLines;
         mFileLines = nullptr;
         return;
     }
     if(!mFileLines->parse())
     {
-        QMessageBox::warning(this, "Error", "Failed to parse file!");
+        SimpleWarningBox(this, tr("Error"), tr("Failed to parse file!"));
         delete mFileLines;
         mFileLines = nullptr;
         return;

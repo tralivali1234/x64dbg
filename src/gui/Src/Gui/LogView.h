@@ -1,27 +1,35 @@
-#ifndef LOGVIEW_H
-#define LOGVIEW_H
+#pragma once
 
 #include <QTextBrowser>
 #include <cstdio>
+#include "LineEditDialog.h"
 
 class LogView : public QTextBrowser
 {
     Q_OBJECT
 public:
-    explicit LogView(QWidget* parent = 0);
+    explicit LogView(QWidget* parent = nullptr);
     ~LogView();
     void setupContextMenu();
     void contextMenuEvent(QContextMenuEvent* event) override;
     void showEvent(QShowEvent* event) override;
     void hideEvent(QHideEvent* event) override;
+    static void handleLink(QWidget* parent, const QUrl & link);
+    static void linkify(QString & msg);
 
 public slots:
     void refreshShortcutsSlot();
     void updateStyle();
-    void addMsgToLogSlot(QByteArray msg);
+    void addMsgToLogSlot(QByteArray msg); /* Non-HTML Log Function*/
+    void addMsgToLogHtmlSlot(QByteArray msg); /* HTML accepting Log Function */
+    void stopRedirectLogSlot();
+    void redirectLogToFileSlot(QString filename);
     void redirectLogSlot();
     void setLoggingEnabled(bool enabled);
     void autoScrollSlot();
+    void findInLogSlot();
+    void findNextInLogSlot();
+    void findPreviousInLogSlot();
     void copyToGlobalNotes();
     void copyToDebuggeeNotes();
     void pasteSlot();
@@ -29,6 +37,7 @@ public slots:
     void onAnchorClicked(const QUrl & link);
 
     void clearLogSlot();
+    void saveToFileSlot(QString filename);
     void saveSlot();
     void toggleLoggingSlot();
     void flushTimerSlot();
@@ -36,6 +45,8 @@ public slots:
 
 private:
     static const int MAX_LOG_BUFFER_SIZE = 1024 * 1024;
+
+    void addMsgToLogSlotRaw(QByteArray msg, bool htmlEscape); /* Non-HTML Log Function*/
 
     bool loggingEnabled;
     bool autoScroll;
@@ -52,11 +63,14 @@ private:
     QMenu* menuCopyToNotes;
     QAction* actionCopyToGlobalNotes;
     QAction* actionCopyToDebuggeeNotes;
+    QAction* actionFindInLog;
+    QAction* actionFindNext;
+    QAction* actionFindPrevious;
+    LineEditDialog* dialogFindInLog;
 
     FILE* logRedirection;
     QString logBuffer;
     QTimer* flushTimer;
     bool flushLog;
+    QString lastFindText;
 };
-
-#endif // LOGVIEW_H

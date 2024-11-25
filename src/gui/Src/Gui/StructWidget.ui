@@ -16,10 +16,6 @@
   <property name="windowTitle">
    <string>Struct</string>
   </property>
-  <property name="windowIcon">
-   <iconset resource="../../resource.qrc">
-    <normaloff>:/icons/images/struct.png</normaloff>:/icons/images/struct.png</iconset>
-  </property>
   <layout class="QHBoxLayout" name="horizontalLayout">
    <property name="spacing">
     <number>0</number>
@@ -47,12 +43,20 @@
      <property name="selectionBehavior">
       <enum>QAbstractItemView::SelectRows</enum>
      </property>
+     <property name="indentation">
+      <number>15</number>
+     </property>
      <attribute name="headerCascadingSectionResizes">
       <bool>false</bool>
      </attribute>
      <column>
       <property name="text">
-       <string>Name</string>
+       <string>Field</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>Offset</string>
       </property>
      </column>
      <column>
@@ -74,8 +78,6 @@
    </item>
   </layout>
  </widget>
- <resources>
-  <include location="../../resource.qrc"/>
- </resources>
+ <resources/>
  <connections/>
 </ui>

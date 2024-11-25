@@ -1,5 +1,4 @@
-#ifndef LINEEDITDIALOG_H
-#define LINEEDITDIALOG_H
+#pragma once
 
 #include <QDialog>
 
@@ -13,7 +12,7 @@ class LineEditDialog : public QDialog
     Q_OBJECT
 
 public:
-    explicit LineEditDialog(QWidget* parent = 0);
+    explicit LineEditDialog(QWidget* parent = nullptr);
     ~LineEditDialog();
     QString editText;
     bool bChecked;
@@ -39,5 +38,3 @@ private:
     unsigned int fixed_size;
     bool fpuMode;
 };
-
-#endif // LINEEDITDIALOG_H

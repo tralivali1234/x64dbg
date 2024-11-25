@@ -61,24 +61,21 @@ static FORMATRESULT memoryFormatter(char* dest, size_t destCount, int argc, char
         strcpy_s(dest, destCount, GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Invalid argument...")));
         return FORMAT_ERROR_MESSAGE;
     }
-    if(size == 0)
-    {
-        strcpy_s(dest, destCount, GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Not enough arguments...")));
-        return FORMAT_ERROR_MESSAGE;
-    }
     if(size > 1024 * 1024 * 10) //10MB max
     {
         strcpy_s(dest, destCount, GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Too much data (10MB max)...")));
         return FORMAT_ERROR_MESSAGE;
     }
     std::vector<Char> data(size);
-    if(!MemRead(addr, data.data(), size * sizeof(Char)))
+    duint read = -1;
+    if(!MemRead(addr, data.data(), size * sizeof(Char), &read) && read == -1)
     {
         strcpy_s(dest, destCount, GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Failed to read memory...")));
         return FORMAT_ERROR_MESSAGE;
     }
+    data.resize(read);
     auto result = format(data);
-    if(result.size() > destCount)
+    if(result.size() >= destCount)
         return FORMAT_BUFFER_TOO_SMALL;
     strcpy_s(dest, destCount, result.c_str());
     return FORMAT_SUCCESS;
@@ -226,6 +223,27 @@ void FormatFunctions::Init()
             result += StringUtils::sprintf("%02X", data[i]);
         return formatcpy_s(dest, destCount, result.c_str());
     });
+
+    Register("comment", [](char* dest, size_t destCount, int argc, char* argv[], duint addr, void* userdata)
+    {
+        char comment[MAX_COMMENT_SIZE] = "";
+        if(DbgGetCommentAt(addr, comment))
+        {
+            if(comment[0] == '\1') //automatic comment
+                return formatcpy_s(dest, destCount, comment + 1);
+            else
+                return formatcpy_s(dest, destCount, comment);
+        }
+        return FORMAT_ERROR;
+    });
+
+    Register("label", [](char* dest, size_t destCount, int argc, char* argv[], duint addr, void* userdata)
+    {
+        char label[MAX_LABEL_SIZE] = "";
+        if(DbgGetLabelAt(addr, SEG_DEFAULT, label))
+            return formatcpy_s(dest, destCount, label);
+        return FORMAT_ERROR;
+    });
 }
 
 bool FormatFunctions::Register(const String & type, const CBFORMATFUNCTION & cbFunction, void* userdata)
@@ -280,9 +298,10 @@ bool FormatFunctions::Call(std::vector<char> & dest, const String & type, std::v
         argvn[i] = (char*)argv[i].c_str();
 
     const auto & f = found->second;
-    dest.resize(512, '\0');
+    if(dest.size() == 0)
+        dest.resize(512, '\0');
 fuckthis:
-    auto result = f.cbFunction(dest.data(), dest.size() - 1, int(argv.size()), argvn.data(), value, f.userdata);
+    auto result = f.cbFunction(dest.data(), dest.size(), int(argv.size()), argvn.data(), value, f.userdata);
     if(result == FORMAT_BUFFER_TOO_SMALL)
     {
         dest.resize(dest.size() * 2, '\0');

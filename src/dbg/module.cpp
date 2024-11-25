@@ -11,8 +11,9 @@
 #include <shlwapi.h>
 #include "console.h"
 #include "debugger.h"
+#include "value.h"
 #include <memory>
-#include "symbolundecorator.h"
+#include "LLVMDemangle/LLVMDemangle.h"
 
 std::map<Range, std::unique_ptr<MODINFO>, RangeCompare> modinfo;
 std::unordered_map<duint, std::string> hashNameMap;
@@ -60,7 +61,7 @@ static NTSTATUS ImageNtHeaders(duint base, duint size, PIMAGE_NT_HEADERS* outHea
 }
 
 // Use only with SEC_COMMIT mappings, not SEC_IMAGE! (in that case, just do VA = base + rva...)
-static ULONG64 RvaToVa(ULONG64 base, PIMAGE_NT_HEADERS ntHeaders, ULONG64 rva)
+ULONG64 ModRvaToOffset(ULONG64 base, PIMAGE_NT_HEADERS ntHeaders, ULONG64 rva)
 {
     PIMAGE_SECTION_HEADER section = IMAGE_FIRST_SECTION(ntHeaders);
     for(WORD i = 0; i < ntHeaders->FileHeader.NumberOfSections; ++i)
@@ -81,7 +82,7 @@ static void ReadExportDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
     // Get the export directory and its size
     ULONG exportDirSize;
     auto exportDir = (PIMAGE_EXPORT_DIRECTORY)RtlImageDirectoryEntryToData((PVOID)FileMapVA,
-                     FALSE,
+                     Info.isVirtual,
                      IMAGE_DIRECTORY_ENTRY_EXPORT,
                      &exportDirSize);
     if(exportDirSize == 0 || exportDir == nullptr ||
@@ -96,7 +97,7 @@ static void ReadExportDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
 
     auto rva2offset = [&Info](ULONG64 rva)
     {
-        return RvaToVa(0, Info.headers, rva);
+        return Info.isVirtual ? rva : ModRvaToOffset(0, Info.headers, rva);
     };
 
     auto addressOfFunctionsOffset = rva2offset(exportDir->AddressOfFunctions);
@@ -138,7 +139,7 @@ static void ReadExportDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
         auto & entry = Info.exports.back();
         entry.ordinal = i + exportDir->Base;
         entry.rva = addressOfFunctions[i];
-        const auto entryVa = RvaToVa(FileMapVA, Info.headers, entry.rva);
+        const auto entryVa = Info.isVirtual ? entry.rva : ModRvaToOffset(FileMapVA, Info.headers, entry.rva);
         entry.forwarded = entryVa >= (ULONG64)exportDir && entryVa < (ULONG64)exportDir + exportDirSize;
         if(entry.forwarded)
         {
@@ -212,7 +213,12 @@ static void ReadExportDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
     for(auto & x : Info.exports)
     {
         if(!x.name.empty())
-            undecorateName(x.name, x.undecoratedName);
+        {
+            auto demangled = LLVMDemangle(x.name.c_str());
+            if(demangled && x.name.compare(demangled) != 0)
+                x.undecoratedName = demangled;
+            LLVMDemangleFree(demangled);
+        }
     }
 }
 
@@ -221,7 +227,7 @@ static void ReadImportDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
     // Get the import directory and its size
     ULONG importDirSize;
     auto importDescriptor = (PIMAGE_IMPORT_DESCRIPTOR)RtlImageDirectoryEntryToData((PVOID)FileMapVA,
-                            FALSE,
+                            Info.isVirtual,
                             IMAGE_DIRECTORY_ENTRY_IMPORT,
                             &importDirSize);
     if(importDirSize == 0 || importDescriptor == nullptr ||
@@ -232,7 +238,7 @@ static void ReadImportDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
     const ULONG64 ordinalFlag = IMAGE64(Info.headers) ? IMAGE_ORDINAL_FLAG64 : IMAGE_ORDINAL_FLAG32;
     auto rva2offset = [&Info](ULONG64 rva)
     {
-        return RvaToVa(0, Info.headers, rva);
+        return Info.isVirtual ? rva : ModRvaToOffset(0, Info.headers, rva);
     };
 
     for(size_t moduleIndex = 0; importDescriptor->Name != 0; ++importDescriptor, ++moduleIndex)
@@ -283,7 +289,7 @@ static void ReadImportDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
                 // Import by ordinal
                 entry.ordinal = THUNK_VAL(Info.headers, thunkData, u1.Ordinal) & 0xffff;
                 char buf[18];
-                sprintf_s(buf, "Ordinal%u", (ULONG)entry.ordinal);
+                sprintf_s(buf, "Ordinal#%u", (ULONG)entry.ordinal);
                 entry.name = String((const char*)buf);
             }
         }
@@ -300,7 +306,15 @@ static void ReadImportDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
 
     // undecorate names
     for(auto & i : Info.imports)
-        undecorateName(i.name, i.undecoratedName);
+    {
+        if(!i.name.empty())
+        {
+            auto demangled = LLVMDemangle(i.name.c_str());
+            if(demangled && i.name.compare(demangled) != 0)
+                i.undecoratedName = demangled;
+            LLVMDemangleFree(demangled);
+        }
+    }
 }
 
 static void ReadTlsCallbacks(MODINFO & Info, ULONG_PTR FileMapVA)
@@ -311,7 +325,7 @@ static void ReadTlsCallbacks(MODINFO & Info, ULONG_PTR FileMapVA)
     // Get the TLS directory
     ULONG tlsDirSize;
     auto tlsDir = (PIMAGE_TLS_DIRECTORY)RtlImageDirectoryEntryToData((PVOID)FileMapVA,
-                  FALSE,
+                  Info.isVirtual,
                   IMAGE_DIRECTORY_ENTRY_TLS,
                   &tlsDirSize);
     if(tlsDir == nullptr /*|| tlsDirSize == 0*/ || // The loader completely ignores the directory size. Setting it to 0 is an anti-debug trick
@@ -326,7 +340,8 @@ static void ReadTlsCallbacks(MODINFO & Info, ULONG_PTR FileMapVA)
         return;
 
     auto imageBase = HEADER_FIELD(Info.headers, ImageBase);
-    auto tlsArrayOffset = RvaToVa(0, Info.headers, tlsDir->AddressOfCallBacks - imageBase);
+    auto rva = tlsDir->AddressOfCallBacks - imageBase;
+    auto tlsArrayOffset = Info.isVirtual ? rva : ModRvaToOffset(0, Info.headers, rva);
     if(!tlsArrayOffset)
         return;
 
@@ -356,7 +371,7 @@ static void ReadBaseRelocationTable(MODINFO & Info, ULONG_PTR FileMapVA)
     // Get address and size of base relocation table
     ULONG totalBytes;
     auto baseRelocBlock = (PIMAGE_BASE_RELOCATION)RtlImageDirectoryEntryToData((PVOID)FileMapVA,
-                          FALSE,
+                          Info.isVirtual,
                           IMAGE_DIRECTORY_ENTRY_BASERELOC,
                           &totalBytes);
     if(baseRelocBlock == nullptr || totalBytes == 0 ||
@@ -428,7 +443,7 @@ static void ReadDebugDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
     // Get the debug directory and its size
     ULONG debugDirSize;
     auto debugDir = (PIMAGE_DEBUG_DIRECTORY)RtlImageDirectoryEntryToData((PVOID)FileMapVA,
-                    FALSE,
+                    Info.isVirtual,
                     IMAGE_DIRECTORY_ENTRY_DEBUG,
                     &debugDirSize);
     if(debugDirSize == 0 || debugDir == nullptr ||
@@ -460,10 +475,14 @@ static void ReadDebugDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
         BYTE PdbFileName[1];
     };
 
-    const auto supported = [&Info](PIMAGE_DEBUG_DIRECTORY entry)
+    const auto supported = [&Info, FileMapVA](PIMAGE_DEBUG_DIRECTORY entry)
     {
         // Check for valid RVA
-        const auto offset = RvaToVa(0, Info.headers, entry->AddressOfRawData);
+        ULONG_PTR offset = 0;
+        if(entry->AddressOfRawData)
+            offset = Info.isVirtual ? entry->AddressOfRawData : (ULONG_PTR)ModRvaToOffset(0, Info.headers, entry->AddressOfRawData);
+        else if(entry->PointerToRawData)
+            offset = entry->PointerToRawData;
         if(!offset)
             return false;
 
@@ -476,7 +495,7 @@ static void ReadDebugDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
         if(entry->Type == IMAGE_DEBUG_TYPE_CODEVIEW) // TODO: support other types (DBG)?
         {
             // Get the CV signature and do a final size check if it is valid
-            auto signature = *(DWORD*)(Info.fileMapVA + offset);
+            auto signature = *(DWORD*)(FileMapVA + offset);
             if(signature == '01BN')
                 return entry->SizeOfData >= sizeof(CV_INFO_PDB20) && entry->SizeOfData < sizeof(CV_INFO_PDB20) + DOS_MAX_PATH_LENGTH;
             else if(signature == 'SDSR')
@@ -556,7 +575,12 @@ static void ReadDebugDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
     }
 
     // At this point we know the entry is a valid CV one
-    auto cvData = (unsigned char*)(FileMapVA + RvaToVa(0, Info.headers, entry->AddressOfRawData));
+    ULONG_PTR offset = 0;
+    if(entry->AddressOfRawData)
+        offset = Info.isVirtual ? entry->AddressOfRawData : (ULONG_PTR)ModRvaToOffset(0, Info.headers, entry->AddressOfRawData);
+    else if(entry->PointerToRawData)
+        offset = entry->PointerToRawData;
+    auto cvData = (unsigned char*)(FileMapVA + offset);
     auto signature = *(DWORD*)cvData;
     if(signature == '01BN')
     {
@@ -644,7 +668,7 @@ static void ReadExceptionDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
     // Get address and size of exception directory
     ULONG totalBytes;
     auto baseRuntimeFunctions = (PRUNTIME_FUNCTION)RtlImageDirectoryEntryToData((PVOID)FileMapVA,
-                                FALSE,
+                                Info.isVirtual,
                                 IMAGE_DIRECTORY_ENTRY_EXCEPTION,
                                 &totalBytes);
     if(baseRuntimeFunctions == nullptr || totalBytes == 0 ||
@@ -653,13 +677,28 @@ static void ReadExceptionDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
         return;
 
     Info.runtimeFunctions.resize(totalBytes / sizeof(RUNTIME_FUNCTION));
-    for(size_t i = 0; i < Info.runtimeFunctions.size(); i++)
-        Info.runtimeFunctions[i] = baseRuntimeFunctions[i];
+    memcpy(Info.runtimeFunctions.data(), baseRuntimeFunctions, Info.runtimeFunctions.size() * sizeof(RUNTIME_FUNCTION));
+
+    for(const auto & runtimeFunction : Info.runtimeFunctions)
+    {
+        if((runtimeFunction.UnwindData & RUNTIME_FUNCTION_INDIRECT) != 0)
+        {
+            auto parentEntryRva = runtimeFunction.UnwindData & ~RUNTIME_FUNCTION_INDIRECT;
+            auto parentIndex = (parentEntryRva - ((ULONG_PTR)baseRuntimeFunctions - FileMapVA)) / sizeof(RUNTIME_FUNCTION);
+            if(parentIndex < Info.runtimeFunctions.size())
+            {
+                const auto & parentEntry = Info.runtimeFunctions[parentIndex];
+                Info.parentFunctions.emplace_back(parentEntryRva, parentEntry.BeginAddress);
+            }
+        }
+    }
 
     std::stable_sort(Info.runtimeFunctions.begin(), Info.runtimeFunctions.end(), [](const RUNTIME_FUNCTION & a, const RUNTIME_FUNCTION & b)
     {
         return std::tie(a.BeginAddress, a.EndAddress) < std::tie(b.BeginAddress, b.EndAddress);
     });
+
+    std::stable_sort(Info.parentFunctions.begin(), Info.parentFunctions.end());
 }
 #endif // _WIN64
 
@@ -676,6 +715,59 @@ static bool GetUnsafeModuleInfoImpl(MODINFO & Info, ULONG_PTR FileMapVA, void(*f
     }
     return true;
 }
+
+// Determine user/system module based on path, the default method
+static MODULEPARTY GetDefaultParty(const MODINFO & Info)
+{
+    if(Info.isVirtual)
+        return mod_user;
+    // Determine whether the module is located in system
+    wchar_t szWindowsDir[MAX_PATH];
+    GetWindowsDirectoryW(szWindowsDir, _countof(szWindowsDir));
+    String Utf8Sysdir = StringUtils::Utf16ToUtf8(szWindowsDir);
+    Utf8Sysdir.append("\\");
+    if(_memicmp(Utf8Sysdir.c_str(), Info.path, Utf8Sysdir.size()) == 0)
+    {
+        return mod_system;
+    }
+    else
+    {
+        return mod_user;
+    }
+}
+
+// These are used to store party in DB
+struct MODULEPARTYINFO : AddrInfo
+{
+    MODULEPARTY party;
+};
+
+struct ModuleSerializer : AddrInfoSerializer<MODULEPARTYINFO>
+{
+    bool Save(const MODULEPARTYINFO & value) override
+    {
+        setHex("hash", value.modhash);
+        setInt("party", value.party);
+        return true;
+    }
+
+    bool Load(MODULEPARTYINFO & value) override
+    {
+        value.addr = 0;
+        value.manual = true;
+        return getHex("hash", value.modhash) && getInt("party", value.party);
+    }
+};
+
+struct ModulePartyInfo : AddrInfoHashMap<LockModuleHashes, MODULEPARTYINFO, ModuleSerializer>
+{
+    const char* jsonKey() const override
+    {
+        return "modules";
+    }
+};
+
+static ModulePartyInfo modulePartyInfo;
 
 void GetModuleInfo(MODINFO & Info, ULONG_PTR FileMapVA)
 {
@@ -721,6 +813,8 @@ void GetModuleInfo(MODINFO & Info, ULONG_PTR FileMapVA)
 
         curSection.addr = ntSection->VirtualAddress + Info.base;
         curSection.size = ntSection->Misc.VirtualSize;
+        if(!curSection.size)
+            curSection.size = ntSection->SizeOfRawData;
 
         // Null-terminate section name
         char sectionName[IMAGE_SIZEOF_SHORT_NAME + 1];
@@ -757,7 +851,7 @@ void GetModuleInfo(MODINFO & Info, ULONG_PTR FileMapVA)
 #undef GetUnsafeModuleInfo
 }
 
-bool ModLoad(duint Base, duint Size, const char* FullPath)
+bool ModLoad(duint Base, duint Size, const char* FullPath, bool loadSymbols)
 {
     // Handle a new module being loaded
     if(!Base || !Size || !FullPath)
@@ -784,15 +878,15 @@ bool ModLoad(duint Base, duint Size, const char* FullPath)
 
         if(fileStart)
         {
-            strcpy_s(file, fileStart + 1);
+            strncpy_s(file, fileStart + 1, _TRUNCATE);
             fileStart[0] = '\0';
         }
         else
-            strcpy_s(file, FullPath);
+            strncpy_s(file, FullPath, _TRUNCATE);
     }
 
     // Calculate module hash from full file name
-    info.hash = ModHashFromName(file);
+    info.hash = ModHashFromName(file, false);
 
     // Copy the extension into the module struct
     {
@@ -814,30 +908,26 @@ bool ModLoad(duint Base, duint Size, const char* FullPath)
     info.fileMap = nullptr;
     info.fileMapVA = 0;
 
-    // Determine whether the module is located in system
-    wchar_t sysdir[MAX_PATH];
-    GetEnvironmentVariableW(L"windir", sysdir, _countof(sysdir));
-    String Utf8Sysdir = StringUtils::Utf16ToUtf8(sysdir);
-    Utf8Sysdir.append("\\");
-    if(_memicmp(Utf8Sysdir.c_str(), FullPath, Utf8Sysdir.size()) == 0)
-    {
-        info.party = 1;
-    }
-    else
-    {
-        info.party = 0;
-    }
-
     // Load module data
-    bool virtualModule = strstr(FullPath, "virtual:\\") == FullPath;
+    info.isVirtual = strstr(FullPath, "virtual:\\") == FullPath;
 
-    if(!virtualModule)
+    MODULEPARTYINFO modParty;
+    if(modulePartyInfo.Get(info.hash, modParty))
+        info.party = modParty.party;
+    else
+        info.party = GetDefaultParty(info);
+
+    if(!info.isVirtual)
     {
         auto wszFullPath = StringUtils::Utf8ToUtf16(FullPath);
 
         // Load the physical module from disk
         if(StaticFileLoadW(wszFullPath.c_str(), UE_ACCESS_READ, false, &info.fileHandle, &info.loadedSize, &info.fileMap, &info.fileMapVA))
         {
+            // Fix an anti-debug trick, which opens exclusive access to the file
+            CloseHandle(info.fileHandle);
+            info.fileHandle = (HANDLE)1; // Set to non-zero for TitanEngine compatibility
+
             GetModuleInfo(info, info.fileMapVA);
 
             Size = GetPE32DataFromMappedFile(info.fileMapVA, 0, UE_SIZEOFIMAGE);
@@ -854,36 +944,40 @@ bool ModLoad(duint Base, duint Size, const char* FullPath)
     else
     {
         // This was a virtual module -> read it remotely
-        Memory<unsigned char*> data(Size);
-        MemRead(Base, data(), data.size());
+        info.mappedData.realloc(Size);
+        MemRead(Base, info.mappedData(), info.mappedData.size());
 
         // Get information from the local buffer
         // TODO: this does not properly work for file offset -> rva conversions (since virtual modules are SEC_IMAGE)
-        GetModuleInfo(info, (ULONG_PTR)data());
+        info.loadedSize = (DWORD)Size;
+        GetModuleInfo(info, (ULONG_PTR)info.mappedData());
     }
 
     info.symbols = &EmptySymbolSource; // empty symbol source per default
-    // TODO: setting to auto load symbols
-    for(const auto & pdbPath : info.pdbPaths)
+
+    if(loadSymbols)
     {
-        if(info.loadSymbols(pdbPath, bForceLoadSymbols))
-            break;
+        for(const auto & pdbPath : info.pdbPaths)
+        {
+            if(info.loadSymbols(pdbPath, bForceLoadSymbols))
+                break;
+        }
     }
 
     // Add module to list
     EXCLUSIVE_ACQUIRE(LockModules);
-    modinfo.insert(std::make_pair(Range(Base, Base + Size - 1), std::move(infoPtr)));
+    modinfo.emplace(Range(Base, Base + Size - 1), std::move(infoPtr));
     EXCLUSIVE_RELEASE();
 
     // Put labels for virtual module exports
-    if(virtualModule)
+    if(info.isVirtual)
     {
         if(info.entry >= Base && info.entry < Base + Size)
-            LabelSet(info.entry, "EntryPoint", false);
+            LabelSet(info.entry, "EntryPoint", false, true);
 
         apienumexports(Base, [](duint base, const char* mod, const char* name, duint addr)
         {
-            LabelSet(addr, name, false);
+            LabelSet(addr, name, false, true);
         });
     }
 
@@ -910,7 +1004,7 @@ bool ModUnload(duint Base)
     return true;
 }
 
-void ModClear()
+void ModClear(bool updateGui)
 {
     {
         // Clean up all the modules
@@ -925,7 +1019,8 @@ void ModClear()
     }
 
     // Tell the symbol updater
-    GuiSymbolUpdateModuleList(0, nullptr);
+    if(updateGui)
+        GuiSymbolUpdateModuleList(0, nullptr);
 }
 
 MODINFO* ModInfoFromAddr(duint Address)
@@ -1005,14 +1100,27 @@ duint ModContentHashFromAddr(duint Address)
         return 0;
 }
 
-duint ModHashFromName(const char* Module)
+duint ModHashFromName(const char* Module, bool tolower)
 {
     // return MODINFO.hash (based on the name)
     ASSERT_NONNULL(Module);
-    auto len = int(strlen(Module));
+    auto len = strlen(Module);
     if(!len)
         return 0;
-    auto hash = murmurhash(Module, len);
+
+    duint hash = 0;
+    if(tolower)
+    {
+        auto & moduleLower = TLSData::get()->moduleHashLower;
+        moduleLower.clear();
+        for(size_t i = 0; i < len; i++)
+            moduleLower.push_back(StringUtils::ToLower(Module[i]));
+        hash = murmurhash(moduleLower.c_str(), moduleLower.size());
+    }
+    else
+    {
+        hash = murmurhash(Module, len);
+    }
 
     //update the hash cache
     SHARED_ACQUIRE(LockModuleHashes);
@@ -1129,7 +1237,7 @@ void ModEnum(const std::function<void(const MODINFO &)> & cbEnum)
         cbEnum(*mod.second);
 }
 
-int ModGetParty(duint Address)
+MODULEPARTY ModGetParty(duint Address)
 {
     SHARED_ACQUIRE(LockModules);
 
@@ -1137,12 +1245,12 @@ int ModGetParty(duint Address)
 
     // If the module is not found, it is an user module
     if(!module)
-        return 0;
+        return mod_user;
 
     return module->party;
 }
 
-void ModSetParty(duint Address, int Party)
+void ModSetParty(duint Address, MODULEPARTY Party)
 {
     EXCLUSIVE_ACQUIRE(LockModules);
 
@@ -1153,6 +1261,34 @@ void ModSetParty(duint Address, int Party)
         return;
 
     module->party = Party;
+
+    // DB
+    MODULEPARTYINFO DBEntry;
+    if(Party != GetDefaultParty(module[0]))  // Save non-default party settings
+    {
+        DBEntry.addr = 0;
+        DBEntry.modhash = module->hash;
+        DBEntry.party = Party;
+        DBEntry.manual = true;
+        modulePartyInfo.Add(DBEntry);
+    }
+    else
+        modulePartyInfo.Delete(module->hash); // Don't need to save the default party
+}
+
+void ModCacheSave(JSON root)
+{
+    modulePartyInfo.CacheSave(root);
+}
+
+void ModCacheLoad(JSON root)
+{
+    modulePartyInfo.CacheLoad(root);
+}
+
+void ModCacheClear()
+{
+    modulePartyInfo.Clear();
 }
 
 bool ModRelocationsFromAddr(duint Address, std::vector<MODRELOCATIONINFO> & Relocations)
@@ -1226,6 +1362,34 @@ bool ModRelocationsInRange(duint Address, duint Size, std::vector<MODRELOCATIONI
 
     return !Relocations.empty();
 }
+
+#if _WIN64
+const RUNTIME_FUNCTION* MODINFO::findRuntimeFunction(DWORD rva, bool resolveIndirect) const
+{
+    const auto entryItr = std::lower_bound(runtimeFunctions.cbegin(), runtimeFunctions.cend(), rva, [](const RUNTIME_FUNCTION & a, const DWORD & rva)
+    {
+        return a.EndAddress <= rva;
+    });
+
+    if(entryItr == runtimeFunctions.cend() || rva < entryItr->BeginAddress)
+        return nullptr;
+
+    auto entry = &*entryItr;
+    if(resolveIndirect && (entry->UnwindData & RUNTIME_FUNCTION_INDIRECT))
+    {
+        auto parentEntryRva = entry->UnwindData & ~RUNTIME_FUNCTION_INDIRECT;
+        const auto parentItr = std::lower_bound(parentFunctions.begin(), parentFunctions.end(), parentEntryRva, [](const std::pair<DWORD, DWORD> & a, const DWORD & b)
+        {
+            return a.first < b;
+        });
+        if(parentItr == parentFunctions.end() || rva < parentItr->first)
+            return nullptr;
+
+        return findRuntimeFunction(parentItr->second, false);
+    }
+    return entry;
+}
+#endif
 
 bool MODINFO::loadSymbols(const String & pdbPath, bool forceLoad)
 {
@@ -1311,6 +1475,112 @@ const MODEXPORT* MODINFO::findExport(duint rva) const
             return &exports[*found];
     }
     return nullptr;
+}
+
+const MODIMPORT* MODINFO::findImport(duint rva) const
+{
+    if(imports.size())
+    {
+        auto found = std::lower_bound(importsByRva.begin(), importsByRva.end(), rva, [this](size_t index, duint rva)
+        {
+            return imports.at(index).iatRva < rva;
+        });
+        found = found != importsByRva.end() && rva >= imports.at(*found).iatRva ? found : importsByRva.end();
+        if(found != importsByRva.end())
+            return &imports[*found];
+    }
+    return nullptr;
+}
+
+static bool resolveApiSetForward(const String & originatingDll, String & forwardDll, String & forwardExport)
+{
+    wchar_t szApiSetDllPath[MAX_PATH] = L"";
+    if(!GetSystemDirectoryW(szApiSetDllPath, _countof(szApiSetDllPath)))
+        return {};
+    wcsncat_s(szApiSetDllPath, L"\\downlevel\\", _TRUNCATE);
+    wcsncat_s(szApiSetDllPath, StringUtils::Utf8ToUtf16(forwardDll).c_str(), _TRUNCATE);
+    wcsncat_s(szApiSetDllPath, L".dll", _TRUNCATE);
+
+    auto ticks = GetTickCount();
+    // Load the physical module from disk
+    MODINFO info = {};
+    if(!StaticFileLoadW(szApiSetDllPath, UE_ACCESS_READ, false, &info.fileHandle, &info.loadedSize, &info.fileMap, &info.fileMapVA))
+        return false;
+
+    GetModuleInfo(info, info.fileMapVA);
+
+    NameIndex found;
+    if(!NameIndex::findByName(info.exportsByName, forwardExport, found, true))
+        return false;
+
+    const auto & foundExport = info.exports[found.index];
+    if(!foundExport.forwarded)
+    {
+        dputs("assertion failure, api set not forwarded");
+        return false;
+    }
+
+    const auto & forwardName = foundExport.forwardName;
+    auto dotIdx = forwardName.find('.');
+    if(dotIdx == String::npos)
+        return false;
+
+    forwardDll = forwardName.substr(0, dotIdx);
+    forwardExport = forwardName.substr(dotIdx + 1);
+
+    // Some DLLs have extra mappings: https://www.geoffchappell.com/studies/windows/win32/apisetschema/history/sets61.htm
+    // This is a heuristic to resolve correctly without having to implement proper APISetMap support
+    if(forwardDll == originatingDll)
+    {
+        // The only supported exceptional mapping is kernel32 -> kernelbase
+        if(_stricmp(forwardDll.c_str(), "kernel32") != 0)
+            return false;
+
+        forwardDll = "kernelbase";
+    }
+
+    return !forwardExport.empty();
+}
+
+duint MODINFO::getProcAddress(const String & exportName, int maxForwardDepth) const
+{
+    NameIndex found;
+    if(!NameIndex::findByName(exportsByName, exportName, found, false))
+        return 0;
+    const auto exportInfo = &exports[found.index];
+    if(maxForwardDepth > 0 && exportInfo->forwarded)
+    {
+        const auto & forwardName = exportInfo->forwardName;
+        auto dotIdx = forwardName.find('.');
+        if(dotIdx == String::npos)
+            return 0;
+        auto forwardExport = forwardName.substr(dotIdx + 1);
+        if(forwardExport.empty())
+            return 0;
+        auto forwardDll = forwardName.substr(0, dotIdx);
+        auto forwardBase = ModBaseFromName(forwardDll.c_str());
+        if(forwardBase == 0 && _strnicmp(forwardDll.c_str(), "api-", 4) == 0 || _strnicmp(forwardDll.c_str(), "ext-", 4) == 0)
+        {
+            if(!resolveApiSetForward(name, forwardDll, forwardExport))
+                return 0;
+            forwardBase = ModBaseFromName(forwardDll.c_str());
+        }
+        auto forwardModule = ModInfoFromAddr(forwardBase);
+        if(forwardModule == nullptr)
+            return 0;
+        if(forwardExport[0] == '#')
+        {
+            duint ordinal = 0;
+            if(!convertNumber(forwardExport.c_str() + 1, ordinal, 0) || ordinal > 0xFFFF)
+                return 0;
+            auto exportIndex = ordinal - forwardModule->exportOrdinalBase;
+            if(exportIndex >= forwardModule->exports.size())
+                return 0;
+            return forwardModule->base + forwardModule->exports[exportIndex].rva;
+        }
+        return forwardModule->getProcAddress(forwardExport, maxForwardDepth - 1);
+    }
+    return base + exportInfo->rva;
 }
 
 void MODIMPORT::convertToGuiSymbol(duint base, SYMBOLINFO* info) const

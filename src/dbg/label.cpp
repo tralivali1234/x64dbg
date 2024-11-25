@@ -83,11 +83,19 @@ bool LabelGet(duint Address, char* Text)
         if(found == tempLabels.end())
             return false;
         if(Text)
-            strcpy_s(Text, MAX_LABEL_SIZE, found->second.c_str());
+            strncpy_s(Text, MAX_LABEL_SIZE, found->second.c_str(), _TRUNCATE);
         return true;
     }
     if(Text)
-        strcpy_s(Text, MAX_LABEL_SIZE, label.text.c_str());
+        strncpy_s(Text, MAX_LABEL_SIZE, label.text.c_str(), _TRUNCATE);
+    return true;
+}
+
+bool LabelIsTemporary(duint Address)
+{
+    auto found = tempLabels.find(Address);
+    if(found == tempLabels.end())
+        return false;
     return true;
 }
 
@@ -100,11 +108,19 @@ void LabelDelRange(duint Start, duint End, bool Manual)
 {
     labels.DeleteRange(Start, End, Manual);
     if(Start == 0 && End == ~0)
+    {
         tempLabels.clear();
+    }
     else
-        for(auto it = tempLabels.begin(); it != tempLabels.end(); ++it)
+    {
+        for(auto it = tempLabels.begin(); it != tempLabels.end();)
+        {
             if(it->first >= Start && it->first < End)
                 it = tempLabels.erase(it);
+            else
+                ++it;
+        }
+    }
 }
 
 void LabelCacheSave(JSON Root)
@@ -141,5 +157,8 @@ void LabelGetList(std::vector<LABELSINFO> & list)
 
 bool LabelGetInfo(duint Address, LABELSINFO* info)
 {
-    return labels.GetInfo(Address, info);
+    if(info == nullptr)
+        return false;
+
+    return labels.Get(Labels::VaKey(Address), *info);
 }

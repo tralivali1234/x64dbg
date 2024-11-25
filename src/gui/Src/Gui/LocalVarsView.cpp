@@ -41,11 +41,11 @@ void LocalVarsView::setupContextMenu()
     {
         return DbgIsDebugging();
     });
-    mMenu->addAction(makeAction(DIcon("dump.png"), tr("&Follow in Dump"), SLOT(followDumpSlot())), [this](QMenu*)
+    mMenu->addAction(makeAction(DIcon("dump"), tr("&Follow in Dump"), SLOT(followDumpSlot())), [this](QMenu*)
     {
         return getCellContent(getInitialSelection(), 2) != "???";
     });
-    mMenu->addAction(makeAction(DIcon("dump.png"), ArchValue(tr("Follow DWORD in Dump"), tr("Follow QWORD in Dump")), SLOT(followWordInDumpSlot())), [this](QMenu*)
+    mMenu->addAction(makeAction(DIcon("dump"), ArchValue(tr("Follow DWORD in Dump"), tr("Follow QWORD in Dump")), SLOT(followWordInDumpSlot())), [this](QMenu*)
     {
         duint start;
         if(getAddress(getCellContent(getInitialSelection(), 1), start))
@@ -56,7 +56,7 @@ void LocalVarsView::setupContextMenu()
         else
             return false;
     });
-    mMenu->addAction(makeShortcutAction(DIcon("stack.png"), tr("Follow in Stack"), SLOT(followStackSlot()), "ActionFollowStack"), [this](QMenu*)
+    mMenu->addAction(makeShortcutAction(DIcon("stack"), tr("Follow in Stack"), SLOT(followStackSlot()), "ActionFollowStack"), [this](QMenu*)
     {
         duint start;
         if(getAddress(getCellContent(getInitialSelection(), 1), start))
@@ -64,7 +64,7 @@ void LocalVarsView::setupContextMenu()
         else
             return false;
     });
-    mMenu->addAction(makeAction(DIcon("stack.png"), ArchValue(tr("Follow DWORD in Stack"), tr("Follow QWORD in Stack")), SLOT(followWordInStackSlot())), [this](QMenu*)
+    mMenu->addAction(makeAction(DIcon("stack"), ArchValue(tr("Follow DWORD in Stack"), tr("Follow QWORD in Stack")), SLOT(followWordInStackSlot())), [this](QMenu*)
     {
         duint start;
         if(getAddress(getCellContent(getInitialSelection(), 1), start))
@@ -75,11 +75,11 @@ void LocalVarsView::setupContextMenu()
         else
             return false;
     });
-    mMenu->addAction(makeShortcutAction(DIcon("memmap_find_address_page.png"), tr("Follow in Memory Map"), SLOT(followMemMapSlot()), "ActionFollowMemMap"), [this](QMenu*)
+    mMenu->addAction(makeShortcutAction(DIcon("memmap_find_address_page"), tr("Follow in Memory Map"), SLOT(followMemMapSlot()), "ActionFollowMemMap"), [this](QMenu*)
     {
         return getCellContent(getInitialSelection(), 2) != "???";
     });
-    mMenu->addAction(makeShortcutAction(DIcon("modify.png"), tr("&Modify Value"), SLOT(editSlot()), "ActionModifyValue"), [this](QMenu*)
+    mMenu->addAction(makeShortcutAction(DIcon("modify"), tr("&Modify Value"), SLOT(editSlot()), "ActionModifyValue"), [this](QMenu*)
     {
         return getCellContent(getInitialSelection(), 2) != "???";
     });
@@ -87,48 +87,21 @@ void LocalVarsView::setupContextMenu()
     mMenu->addAction(makeAction(tr("&Rename"), SLOT(renameSlot())));
     MenuBuilder* copyMenu = new MenuBuilder(this);
     setupCopyMenu(copyMenu);
-    mMenu->addMenu(makeMenu(DIcon("copy.png"), tr("&Copy")), copyMenu);
+    mMenu->addMenu(makeMenu(DIcon("copy"), tr("&Copy")), copyMenu);
     mMenu->addSeparator();
     MenuBuilder* mBaseRegisters = new MenuBuilder(this);
 #ifdef _WIN64
-    baseRegisters[0] = new QAction("RAX", this);
-    baseRegisters[1] = new QAction("RBX", this);
-    baseRegisters[2] = new QAction("RCX", this);
-    baseRegisters[3] = new QAction("RDX", this);
-    baseRegisters[4] = new QAction("RBP", this);
-    baseRegisters[5] = new QAction("RSP", this);
-    baseRegisters[6] = new QAction("RSI", this);
-    baseRegisters[7] = new QAction("RDI", this);
-    baseRegisters[8] = new QAction("R8", this);
-    baseRegisters[9] = new QAction("R9", this);
-    baseRegisters[10] = new QAction("R10", this);
-    baseRegisters[11] = new QAction("R11", this);
-    baseRegisters[12] = new QAction("R12", this);
-    baseRegisters[13] = new QAction("R13", this);
-    baseRegisters[14] = new QAction("R14", this);
-    baseRegisters[15] = new QAction("R15", this);
-    for(char i = 0; i < 16; i++)
-    {
-        connect(baseRegisters[i], SIGNAL(triggered()), this, SLOT(baseChangedSlot()));
-        baseRegisters[i]->setCheckable(true);
-        mBaseRegisters->addAction(baseRegisters[i]);
-    }
+    const char* baseRegisterNames[] = {"RAX", "BBX", "RCX", "RDX", "RBP", "RSP", "RSI", "RDI", "R8", "R9", "R10", "R11", "R12", "R13", "R14", "R15"};
 #else //x86
-    baseRegisters[0] = new QAction("EAX", this);
-    baseRegisters[1] = new QAction("EBX", this);
-    baseRegisters[2] = new QAction("ECX", this);
-    baseRegisters[3] = new QAction("EDX", this);
-    baseRegisters[4] = new QAction("EBP", this);
-    baseRegisters[5] = new QAction("ESP", this);
-    baseRegisters[6] = new QAction("ESI", this);
-    baseRegisters[7] = new QAction("EDI", this);
-    for(char i = 0; i < 8; i++)
+    const char* baseRegisterNames[] = {"EAX", "EBX", "ECX", "EDX", "EBP", "ESP", "ESI", "EDI"};
+#endif //_WIN64
+    for(unsigned int i = 0; i < _countof(baseRegisters); i++)
     {
+        baseRegisters[i] = new QAction(baseRegisterNames[i], this);
         connect(baseRegisters[i], SIGNAL(triggered()), this, SLOT(baseChangedSlot()));
         baseRegisters[i]->setCheckable(true);
         mBaseRegisters->addAction(baseRegisters[i]);
     }
-#endif //_WIN64
     baseRegisters[4]->setChecked(true); //CBP
     mMenu->addMenu(makeMenu(tr("Base Register")), mBaseRegisters);
     connect(this, SIGNAL(contextMenuSignal(QPoint)), this, SLOT(contextMenuSlot(QPoint)));
@@ -148,9 +121,9 @@ void LocalVarsView::mousePressEvent(QMouseEvent* event)
 
 void LocalVarsView::contextMenuSlot(const QPoint & pos)
 {
-    QMenu wMenu(this);
-    mMenu->build(&wMenu);
-    wMenu.exec(mapToGlobal(pos));
+    QMenu menu(this);
+    mMenu->build(&menu);
+    menu.exec(mapToGlobal(pos));
 }
 
 void LocalVarsView::baseChangedSlot()
@@ -227,7 +200,7 @@ void LocalVarsView::updateSlot()
                         ZYDIS_REGISTER_EBP, ZYDIS_REGISTER_ESP, ZYDIS_REGISTER_ESI, ZYDIS_REGISTER_EDI
 #endif //_WIN64
                     };
-                    for(char j = 0; j < ArchValue(8, 16); j++)
+                    for(unsigned int j = 0; j < _countof(registers); j++)
                     {
                         if(!baseRegisters[j]->isChecked())
                             continue;
@@ -297,7 +270,7 @@ void LocalVarsView::updateSlot()
             } // Analyze finish
             this->currentFunc = start;
         }
-        for(dsint i = 0; i < getRowCount(); i++)
+        for(duint i = 0; i < getRowCount(); i++)
         {
             duint val = 0;
             QByteArray buf = getCellContent(i, 1).toUtf8();
@@ -358,33 +331,33 @@ void LocalVarsView::followDumpSlot()
 {
     duint addr;
     if(getAddress(getCellContent(getInitialSelection(), 1), addr))
-        DbgCmdExec(QString("dump %1").arg(ToPtrString(addr)).toUtf8().constData());
+        DbgCmdExec(QString("dump %1").arg(ToPtrString(addr)));
 }
 
 void LocalVarsView::followStackSlot()
 {
     duint addr;
     if(getAddress(getCellContent(getInitialSelection(), 1), addr))
-        DbgCmdExec(QString("sdump %1").arg(ToPtrString(addr)).toUtf8().constData());
+        DbgCmdExec(QString("sdump %1").arg(ToPtrString(addr)));
 }
 
 void LocalVarsView::followMemMapSlot()
 {
     duint addr;
     if(getAddress(getCellContent(getInitialSelection(), 1), addr))
-        DbgCmdExec(QString("memmapdump %1").arg(ToPtrString(addr)).toUtf8().constData());
+        DbgCmdExec(QString("memmapdump %1").arg(ToPtrString(addr)));
 }
 
 void LocalVarsView::followWordInDumpSlot()
 {
     duint addr;
     if(getAddress(getCellContent(getInitialSelection(), 1), addr))
-        DbgCmdExec(QString("dump [%1]").arg(ToPtrString(addr)).toUtf8().constData());
+        DbgCmdExec(QString("dump [%1]").arg(ToPtrString(addr)));
 }
 
 void LocalVarsView::followWordInStackSlot()
 {
     duint addr;
     if(getAddress(getCellContent(getInitialSelection(), 1), addr))
-        DbgCmdExec(QString("sdump [%1]").arg(ToPtrString(addr)).toUtf8().constData());
+        DbgCmdExec(QString("sdump [%1]").arg(ToPtrString(addr)));
 }

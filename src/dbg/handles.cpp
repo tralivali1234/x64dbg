@@ -1,28 +1,54 @@
+#include <functional>
 #include "handles.h"
 #include "ntdll/ntdll.h"
 #include "exception.h"
 #include "debugger.h"
-#include <functional>
+#include "thread.h"
+#include "threading.h"
 
-typedef NTSTATUS(NTAPI* ZWQUERYSYSTEMINFORMATION)(
-    IN LONG SystemInformationClass,
-    OUT PVOID SystemInformation,
-    IN ULONG SystemInformationLength,
-    OUT PULONG ReturnLength OPTIONAL
-);
+static std::unordered_map<UCHAR, String> HandleTypeNames;
+static std::unordered_map<HANDLE, String> HandleTypeCache;
 
-typedef NTSTATUS(NTAPI* ZWQUERYOBJECT)(
-    IN HANDLE Handle OPTIONAL,
-    IN LONG ObjectInformationClass,
-    OUT PVOID ObjectInformation OPTIONAL,
-    IN ULONG ObjectInformationLength,
-    OUT PULONG ReturnLength OPTIONAL
-);
-
-bool HandlesEnum(duint pid, std::vector<HANDLEINFO> & handles)
+static void HandleTypesEnum()
 {
+    Memory<POBJECT_TYPES_INFORMATION> TypesInformation(16 * 1024, "types");
+    NTSTATUS status = STATUS_SUCCESS;
+    for(;;)
+    {
+        status = NtQueryObject(nullptr, ObjectTypesInformation, TypesInformation(), ULONG(TypesInformation.size()), nullptr);
+        if(status != STATUS_INFO_LENGTH_MISMATCH)
+            break;
+        TypesInformation.realloc(TypesInformation.size() * 2, "types");
+    }
+    if(status != STATUS_SUCCESS)
+        return;
+
+    auto TypeInfo = TypesInformation()->TypeInformation;
+    HandleTypeNames.reserve(TypesInformation()->NumberOfTypes);
+    for(ULONG i = 0; i < TypesInformation()->NumberOfTypes; i++)
+    {
+        auto wtypeName = WString(TypeInfo->TypeName.Buffer, TypeInfo->TypeName.Buffer + TypeInfo->TypeName.Length / 2);
+        auto typeName = StringUtils::Utf16ToUtf8(wtypeName);
+        auto typeIndex = i + 1;
+        if(BridgeGetNtBuildNumber() >= 9600 /* Windows 8.1 */)
+        {
+            typeIndex = TypeInfo->TypeIndex;
+        }
+        HandleTypeNames.emplace((UCHAR)typeIndex, typeName);
+        TypeInfo = (POBJECT_TYPE_INFORMATION)((char*)(TypeInfo + 1) + ALIGN_UP(TypeInfo->TypeName.MaximumLength, ULONG_PTR));
+    }
+}
+
+// Enumerate all handles in the debuggee
+bool HandlesEnum(std::vector<HANDLEINFO> & handles)
+{
+    if(HandleTypeNames.empty())
+        HandleTypesEnum();
+
+    duint pid;
     Memory<PSYSTEM_HANDLE_INFORMATION> HandleInformation(16 * 1024, "_dbg_enumhandles");
     NTSTATUS ErrorCode = ERROR_SUCCESS;
+    pid = fdProcessInfo->dwProcessId;
     for(;;)
     {
         ErrorCode = NtQuerySystemInformation(SystemHandleInformation, HandleInformation(), ULONG(HandleInformation.size()), nullptr);
@@ -35,6 +61,8 @@ bool HandlesEnum(duint pid, std::vector<HANDLEINFO> & handles)
 
     handles.reserve(HandleInformation()->NumberOfHandles);
 
+    EXCLUSIVE_ACQUIRE(LockHandleCache);
+    HandleTypeCache.clear();
     HANDLEINFO info;
     for(ULONG i = 0; i < HandleInformation()->NumberOfHandles; i++)
     {
@@ -44,6 +72,9 @@ bool HandlesEnum(duint pid, std::vector<HANDLEINFO> & handles)
         info.Handle = handle.HandleValue;
         info.TypeNumber = handle.ObjectTypeIndex;
         info.GrantedAccess = handle.GrantedAccess;
+        auto typeNameItr = HandleTypeNames.find(handle.ObjectTypeIndex);
+        if(typeNameItr != HandleTypeNames.end())
+            HandleTypeCache.emplace((HANDLE)handle.HandleValue, typeNameItr->second);
         handles.push_back(info);
     }
     return true;
@@ -55,8 +86,27 @@ static DWORD WINAPI getNameThread(LPVOID lpParam)
     return 0;
 }
 
-bool HandlesGetName(HANDLE hProcess, HANDLE remoteHandle, String & name, String & typeName)
+static String getProcessName(DWORD PID)
 {
+    wchar_t processName[MAX_PATH];
+    std::string processNameUtf8;
+    HANDLE hPIDProcess;
+    hPIDProcess = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, PID);
+    if(hPIDProcess != NULL)
+    {
+        if(GetProcessImageFileNameW(hPIDProcess, processName, _countof(processName)) > 0)
+        {
+            processNameUtf8 = StringUtils::Utf16ToUtf8(processName);
+        }
+        CloseHandle(hPIDProcess);
+    }
+    return processNameUtf8;
+}
+
+// Get the name of a handle of debuggee
+bool HandlesGetName(HANDLE remoteHandle, String & name, String & typeName)
+{
+    HANDLE hProcess = fdProcessInfo->hProcess;
     HANDLE hLocalHandle;
     if(DuplicateHandle(hProcess, remoteHandle, GetCurrentProcess(), &hLocalHandle, 0, FALSE, DUPLICATE_SAME_ACCESS)) //Needs privileges for PID/TID retrival
     {
@@ -95,7 +145,20 @@ bool HandlesGetName(HANDLE hProcess, HANDLE remoteHandle, String & name, String 
             }
 
             if(PID > 0)
-                name = StringUtils::sprintf("PID: %X", PID);
+            {
+                if(PID == fdProcessInfo->dwProcessId)
+                {
+                    name = StringUtils::sprintf("PID: %s (%s)", formatpidtid(PID).c_str(), GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Debuggee")));
+                }
+                else
+                {
+                    std::string processName = getProcessName(PID);
+                    if(processName.size() > 0)
+                        name = StringUtils::sprintf("PID: %s (%s)", formatpidtid(PID).c_str(), processName.c_str());
+                    else
+                        name = StringUtils::sprintf("PID: %s", formatpidtid(PID).c_str());
+                }
+            }
         }
         else if(strcmp(typeName.c_str(), "Thread") == 0)
         {
@@ -115,8 +178,8 @@ bool HandlesGetName(HANDLE hProcess, HANDLE remoteHandle, String & name, String 
                     NTSTATUS isok = NtQueryInformationThread(hThread, ThreadBasicInformation, &threadInfo, sizeof(threadInfo), &threadInfoSize);
                     if(NT_SUCCESS(isok))
                     {
-                        TID = (DWORD)threadInfo.ClientId.UniqueThread;
-                        PID = (DWORD)threadInfo.ClientId.UniqueProcess;
+                        TID = (DWORD)(duint)threadInfo.ClientId.UniqueThread;
+                        PID = (DWORD)(duint)threadInfo.ClientId.UniqueProcess;
                     }
                 }
             };
@@ -134,7 +197,25 @@ bool HandlesGetName(HANDLE hProcess, HANDLE remoteHandle, String & name, String 
             }
 
             if(TID > 0 && PID > 0)
-                name = StringUtils::sprintf("TID: %X, PID: %X", TID, PID);
+            {
+                // Check if the thread is in the debuggee
+                if(PID == fdProcessInfo->dwProcessId)
+                {
+                    char ThreadName[MAX_THREAD_NAME_SIZE];
+                    if(ThreadGetName(TID, ThreadName) && ThreadName[0] != 0)
+                        name = StringUtils::sprintf("TID: %s (%s), PID: %s (%s)", formatpidtid(TID).c_str(), ThreadName, formatpidtid(PID).c_str(), GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Debuggee")));
+                    else
+                        name = StringUtils::sprintf("TID: %s, PID: %s (%s)", formatpidtid(TID).c_str(), ThreadName, formatpidtid(PID).c_str(), GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Debuggee")));
+                }
+                else
+                {
+                    std::string processName = getProcessName(PID);
+                    if(processName.size() > 0)
+                        name = StringUtils::sprintf("TID: %s, PID: %s (%s)", formatpidtid(TID).c_str(), formatpidtid(PID).c_str(), processName.c_str());
+                    else
+                        name = StringUtils::sprintf("TID: %s, PID: %s", formatpidtid(TID).c_str(), formatpidtid(PID).c_str());
+                }
+            }
         }
         if(name.empty())
         {
@@ -153,6 +234,14 @@ bool HandlesGetName(HANDLE hProcess, HANDLE remoteHandle, String & name, String 
     }
     else
         name = String(ErrorCodeToName(GetLastError()));
+
+    if(typeName.empty())
+    {
+        SHARED_ACQUIRE(LockHandleCache);
+        auto itr = HandleTypeCache.find(remoteHandle);
+        if(itr != HandleTypeCache.end())
+            typeName = itr->second;
+    }
     return true;
 }
 
@@ -171,7 +260,29 @@ static WINDOW_INFO getWindowInfo(HWND hWnd)
     GetWindowRect(hWnd, &info.position); //Get Window Rect
     info.style = GetWindowLong(hWnd, GWL_STYLE); //Get Window Style
     info.styleEx = GetWindowLong(hWnd, GWL_EXSTYLE); //Get Window Stye ex
-    info.wndProc = (IsWindowUnicode(hWnd) ? GetClassLongPtrW : GetClassLongPtrA)(hWnd, GCLP_WNDPROC); //Get Window Proc (thanks to ThunderCls!)
+    duint proc1, proc2;
+    proc1 = GetClassLongPtrW(hWnd, GCLP_WNDPROC);
+    proc2 = GetClassLongPtrA(hWnd, GCLP_WNDPROC);
+    if(!DbgMemIsValidReadPtr(proc1))
+        info.wndProc = proc2;
+    else if(!DbgMemIsValidReadPtr(proc2))
+        info.wndProc = proc1;
+    else if(IsWindowUnicode(hWnd))
+        info.wndProc = proc1;
+    else
+        info.wndProc = proc2;
+    if(DbgFunctions()->ModGetParty(info.wndProc) != 0 || !DbgMemIsValidReadPtr(info.wndProc))
+    {
+        duint dlgproc1, dlgproc2;
+        dlgproc1 = GetClassLongPtrW(hWnd, DWLP_DLGPROC);
+        dlgproc2 = GetClassLongPtrA(hWnd, DWLP_DLGPROC);
+        if(!DbgMemIsValidReadPtr(dlgproc1))
+            dlgproc1 = dlgproc2;
+        if(DbgMemIsValidReadPtr(dlgproc1))
+        {
+            info.wndProc = dlgproc1;
+        }
+    }
     info.enabled = IsWindowEnabled(hWnd) == TRUE;
     info.parent = (duint)GetParent(hWnd); //Get Parent Window
     info.threadId = GetWindowThreadProcessId(hWnd, nullptr); //Get Window Thread Id
@@ -285,4 +396,41 @@ bool HandlesEnumHeaps(std::vector<HEAPINFO> & heapList)
     return true;
     */
     return false;
+}
+
+String LoadedAntiCheatDrivers()
+{
+    Memory<RTL_PROCESS_MODULES*> HandleInformation(0x1000, __FUNCTION__);
+    NTSTATUS ErrorCode = ERROR_SUCCESS;
+    for(;;)
+    {
+        ErrorCode = NtQuerySystemInformation(SystemModuleInformation, HandleInformation(), ULONG(HandleInformation.size()), nullptr);
+        if(ErrorCode != STATUS_INFO_LENGTH_MISMATCH)
+            break;
+        HandleInformation.realloc(HandleInformation.size() * 2, __FUNCTION__);
+    }
+    if(ErrorCode != STATUS_SUCCESS)
+        return {};
+    const char* AntiCheatDrivers[] =
+    {
+        "EasyAntiCheat.sys",
+        "EasyAntiCheat_EOS.sys",
+    };
+    std::unordered_set<String> DriverSet;
+    for(auto & Driver : AntiCheatDrivers)
+        DriverSet.insert(StringUtils::ToLower(Driver));
+    String Result;
+    auto Modules = HandleInformation();
+    for(ULONG i = 0; i < Modules->NumberOfModules; i++)
+    {
+        const auto & Module = Modules->Modules[i];
+        String DriverName = (char*)Module.FullPathName + Module.OffsetToFileName;
+        if(DriverSet.count(StringUtils::ToLower(DriverName)))
+        {
+            if(!Result.empty())
+                Result += '\n';
+            Result += DriverName;
+        }
+    }
+    return Result;
 }

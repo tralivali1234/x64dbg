@@ -41,6 +41,11 @@ PLUG_IMPEXP void _plugin_logprintf(const char* format, ...)
     va_end(args);
 }
 
+PLUG_IMPEXP void _plugin_lograw_html(const char* text)
+{
+    dprint_untranslated_html(text);
+}
+
 PLUG_IMPEXP void _plugin_logputs(const char* text)
 {
     dputs_untranslated(text);
@@ -48,12 +53,12 @@ PLUG_IMPEXP void _plugin_logputs(const char* text)
 
 PLUG_IMPEXP void _plugin_logprint(const char* text)
 {
-    dprintf_untranslated("%s", text);
+    dlogprint_untranslated(text);
 }
 
 PLUG_IMPEXP void _plugin_debugpause()
 {
-    DebugUpdateGuiSetStateAsync(GetContextDataEx(hActiveThread, UE_CIP), true);
+    DebugUpdateGuiSetStateAsync(GetContextDataEx(hActiveThread, UE_CIP), paused);
     lock(WAITID_RUN);
     dbgsetforeground();
     dbgsetskipexceptions(false);
@@ -156,6 +161,11 @@ PLUG_IMPEXP bool _plugin_waituntilpaused()
 bool _plugin_registerexprfunction(int pluginHandle, const char* name, int argc, CBPLUGINEXPRFUNCTION cbFunction, void* userdata)
 {
     return pluginexprfuncregister(pluginHandle, name, argc, cbFunction, userdata);
+}
+
+bool _plugin_registerexprfunctionex(int pluginHandle, const char* name, ValueType returnType, const ValueType* argTypes, size_t argCount, CBPLUGINEXPRFUNCTIONEX cbFunction, void* userdata)
+{
+    return pluginexprfuncregisterex(pluginHandle, name, returnType, argTypes, argCount, cbFunction, userdata);
 }
 
 bool _plugin_unregisterexprfunction(int pluginHandle, const char* name)

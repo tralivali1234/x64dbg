@@ -1,10 +1,10 @@
-#ifndef BREAKPOINTSVIEW_H
-#define BREAKPOINTSVIEW_H
+#pragma once
 
 #include <QWidget>
 #include "Bridge.h"
 #include "StdTable.h"
-#include "QBeaEngine.h"
+#include "QZydis.h"
+#include "Breakpoints.h"
 
 class MenuBuilder;
 
@@ -12,17 +12,17 @@ class BreakpointsView : public StdTable
 {
     Q_OBJECT
 public:
-    explicit BreakpointsView(QWidget* parent = 0);
+    explicit BreakpointsView(QWidget* parent = nullptr);
 
 protected:
     void setupContextMenu();
     void updateColors() override;
-    void sortRows(int column, bool ascending) override;
-    QString paintContent(QPainter* painter, dsint rowBase, int rowOffset, int col, int x, int y, int w, int h) override;
+    void sortRows(duint column, bool ascending) override;
+    QString paintContent(QPainter* painter, duint row, duint col, int x, int y, int w, int h) override;
 
 private slots:
     void updateBreakpointsSlot();
-    void disassembleAtSlot(dsint addr, dsint cip);
+    void disassembleAtSlot(duint addr, duint cip);
     void tokenizerConfigUpdatedSlot();
     void contextMenuSlot(const QPoint & pos);
     void followBreakpointSlot();
@@ -35,6 +35,8 @@ private slots:
     void removeAllBreakpointsSlot();
     void addDllBreakpointSlot();
     void addExceptionBreakpointSlot();
+    void copyConditionalBreakpointSlot();
+    void pasteConditionalBreakpointSlot();
 
 private:
     enum
@@ -51,7 +53,7 @@ private:
     std::unordered_map<duint, const char*> mExceptionMap;
     QStringList mExceptionList;
     int mExceptionMaxLength;
-    std::vector<BRIDGEBP> mBps;
+    std::vector<Breakpoints::Data> mBps;
     std::vector<std::pair<RichTextPainter::List, RichTextPainter::List>> mRich;
     QColor mDisasmBackgroundColor;
     QColor mDisasmSelectionColor;
@@ -63,14 +65,14 @@ private:
     duint mCip = 0;
     MenuBuilder* mMenuBuilder;
     QAction* mEnableDisableAction;
-    QBeaEngine* mDisasm;
+    QZydis* mDisasm;
 
-    const int bpIndex(int i)
+    const int bpIndex(int i) const
     {
         return mData.at(i).at(ColAddr).userdata;
     }
 
-    const BRIDGEBP & selectedBp(int index = -1)
+    const Breakpoints::Data & selectedBp(int index = -1) const
     {
         if(index == -1)
             index = getInitialSelection();
@@ -87,7 +89,7 @@ private:
         return bp.addr != 0 || bp.active;
     }
 
-    QString bpTypeName(BPXTYPE type)
+    QString bpTypeName(BPXTYPE type) const
     {
         switch(type)
         {
@@ -106,5 +108,3 @@ private:
         }
     }
 };
-
-#endif // BREAKPOINTSVIEW_H

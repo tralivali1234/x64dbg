@@ -1,5 +1,4 @@
-#ifndef HEXLINEEDITT_H
-#define HEXLINEEDITT_H
+#pragma once
 
 #include <QLineEdit>
 
@@ -14,7 +13,7 @@ class HexLineEdit : public QLineEdit
 
 public:
 
-    explicit HexLineEdit(QWidget* parent = 0);
+    explicit HexLineEdit(QWidget* parent = nullptr);
     ~HexLineEdit();
 
     void keyPressEvent(QKeyEvent* event);
@@ -47,5 +46,3 @@ private:
 
     QByteArray toEncodedData(const QString & text);
 };
-
-#endif // HEXLINEEDITT_H

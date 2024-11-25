@@ -1,5 +1,4 @@
-#ifndef LABELEDSPLITTERDETACHEDWINDOW_H
-#define LABELEDSPLITTERDETACHEDWINDOW_H
+#pragma once
 
 #include <QMainWindow>
 #include <QSplitterHandle>
@@ -33,7 +32,7 @@ class LabeledSplitterDetachedWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    LabeledSplitterDetachedWindow(QWidget* parent = 0, LabeledSplitter* splitterwidget = 0);
+    LabeledSplitterDetachedWindow(QWidget* parent = nullptr, LabeledSplitter* splitterwidget = 0);
     ~LabeledSplitterDetachedWindow();
 
     int index;
@@ -46,6 +45,3 @@ protected:
 
     LabeledSplitter* mSplitterWidget;
 };
-
-
-#endif //LABELEDSPLITTERDETACHEDWINDOW_H

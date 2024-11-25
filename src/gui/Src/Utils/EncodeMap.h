@@ -1,5 +1,4 @@
-#ifndef ENCODEMAP_H
-#define ENCODEMAP_H
+#pragma once
 
 #include <QObject>
 #include "Imports.h"
@@ -8,7 +7,7 @@ class EncodeMap : public QObject
 {
     Q_OBJECT
 public:
-    explicit EncodeMap(QObject* parent = 0);
+    explicit EncodeMap(QObject* parent = nullptr);
     ~EncodeMap();
 
     void setMemoryRegion(duint va);
@@ -83,5 +82,3 @@ protected:
     byte* mBuffer;
     duint mBufferSize;
 };
-
-#endif // ENCODEMAP_H

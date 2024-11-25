@@ -280,7 +280,7 @@ const String StringUtils::WHITESPACE = " \n\r\t";
 
 String StringUtils::Trim(const String & s, const String & delim)
 {
-    return TrimRight(TrimLeft(s));
+    return TrimRight(TrimLeft(s, delim), delim);
 }
 
 String StringUtils::TrimLeft(const String & s, const String & delim)
@@ -377,6 +377,21 @@ WString StringUtils::LocalCpToUtf16(const char* str)
     return convertedString;
 }
 
+String StringUtils::Utf16ToLocalCp(const WString & str)
+{
+    String convertedString;
+    if(str.size() == 0)
+        return convertedString;
+    int requiredSize = WideCharToMultiByte(CP_ACP, 0, str.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if(requiredSize > 0)
+    {
+        convertedString.resize(requiredSize - 1);
+        if(!WideCharToMultiByte(CP_ACP, 0, str.c_str(), -1, (char*)convertedString.c_str(), requiredSize, nullptr, nullptr))
+            convertedString.clear();
+    }
+    return convertedString;
+}
+
 //Taken from: https://stackoverflow.com/a/24315631
 void StringUtils::ReplaceAll(String & s, const String & from, const String & to)
 {
@@ -462,7 +477,7 @@ String StringUtils::ToLower(const String & s)
 {
     auto result = s;
     for(size_t i = 0; i < result.size(); i++)
-        result[i] = tolower(result[i]);
+        result[i] = ToLower(result[i]);
     return result;
 }
 
@@ -611,7 +626,7 @@ int StringUtils::hackicmp(const char* s1, const char* s2)
         if(c1 == '\0')
             return 0;
     s1--, s2--;
-    while((c1 = tolower(*s1++)) == (c2 = tolower(*s2++)))
+    while((c1 = ToLower(*s1++)) == (c2 = ToLower(*s2++)))
         if(c1 == '\0')
             return 0;
     return c1 - c2;

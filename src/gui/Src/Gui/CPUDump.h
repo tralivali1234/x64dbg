@@ -1,5 +1,4 @@
-#ifndef CPUDUMP_H
-#define CPUDUMP_H
+#pragma once
 
 #include "HexDump.h"
 
@@ -7,44 +6,26 @@
 class CPUMultiDump;
 class CPUDisassembly;
 class GotoDialog;
+class CommonActions;
 
 class CPUDump : public HexDump
 {
     Q_OBJECT
 public:
-    explicit CPUDump(CPUDisassembly* disas, CPUMultiDump* multiDump, QWidget* parent = 0);
-    void getColumnRichText(int col, dsint rva, RichTextPainter::List & richText) override;
-    QString paintContent(QPainter* painter, dsint rowBase, int rowOffset, int col, int x, int y, int w, int h);
+    explicit CPUDump(CPUMultiDump* multiDump, CPUDisassembly* disasassembly, QWidget* parent = nullptr);
+    void getColumnRichText(duint col, duint rva, RichTextPainter::List & richText) override;
+    QString paintContent(QPainter* painter, duint row, duint col, int x, int y, int w, int h) override;
     void setupContextMenu();
-    void contextMenuEvent(QContextMenuEvent* event);
-    void mouseDoubleClickEvent(QMouseEvent* event);
-    void mouseMoveEvent(QMouseEvent* event);
+    void getAttention();
+    void contextMenuEvent(QContextMenuEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
 
 signals:
     void displayReferencesWidget();
+    void showDisassemblyTab(duint selectionStart, duint selectionEnd, duint firstAddress);
 
 public slots:
-    void memoryAccessSingleshootSlot();
-    void memoryAccessRestoreSlot();
-    void memoryReadSingleshootSlot();
-    void memoryReadRestoreSlot();
-    void memoryWriteSingleshootSlot();
-    void memoryWriteRestoreSlot();
-    void memoryExecuteSingleshootSlot();
-    void memoryExecuteRestoreSlot();
-    void memoryRemoveSlot();
-    void hardwareAccess1Slot();
-    void hardwareAccess2Slot();
-    void hardwareAccess4Slot();
-    void hardwareAccess8Slot();
-    void hardwareWrite1Slot();
-    void hardwareWrite2Slot();
-    void hardwareWrite4Slot();
-    void hardwareWrite8Slot();
-    void hardwareExecuteSlot();
-    void hardwareRemoveSlot();
-
-    void setLabelSlot();
     void modifyValueSlot();
     void gotoExpressionSlot();
     void gotoFileOffsetSlot();
@@ -79,7 +60,6 @@ public slots:
     void floatDoubleSlot();
     void floatLongDoubleSlot();
 
-    void addressSlot();
     void addressUnicodeSlot();
     void addressAsciiSlot();
     void disassemblySlot();
@@ -96,25 +76,17 @@ public slots:
     void findPattern();
     void copyFileOffsetSlot();
     void undoSelectionSlot();
-    void followStackSlot();
     void findReferencesSlot();
-    void followInDisasmSlot();
-    void followDataSlot();
-    void followDataDumpSlot();
-
-    void watchSlot();
 
     void selectionUpdatedSlot();
     void syncWithExpressionSlot();
-    void followInDumpNSlot();
     void allocMemorySlot();
 
-    void followInMemoryMapSlot();
-    void headerButtonReleasedSlot(int colIndex);
-    void asciiAddressDumpModeUpdatedSlot();
+    void headerButtonReleasedSlot(duint colIndex);
 
 private:
     MenuBuilder* mMenuBuilder;
+    CommonActions* mCommonActions;
 
     QMenu* mPluginMenu;
     QMenu* mFollowInDumpMenu;
@@ -122,10 +94,9 @@ private:
 
     GotoDialog* mGoto = nullptr;
     GotoDialog* mGotoOffset = nullptr;
-    CPUDisassembly* mDisas;
-    CPUMultiDump* mMultiDump;
+    CPUDisassembly* mDisassembly = nullptr;
+    CPUMultiDump* mMultiDump = nullptr;
     int mAsciiSeparator = 0;
-    bool mAsciiAddressDumpMode;
 
     enum ViewEnum_t
     {
@@ -156,5 +127,3 @@ private:
 
     void setView(ViewEnum_t view);
 };
-
-#endif // CPUDUMP_H

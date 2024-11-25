@@ -1,8 +1,9 @@
-#ifndef TRACEFILESEARCH_H
-#define TRACEFILESEARCH_H
+#pragma once
+
 #include "Bridge.h"
-class TraceFileReader;
+#include "TraceFileReader.h"
 
 int TraceFileSearchConstantRange(TraceFileReader* file, duint start, duint end);
 int TraceFileSearchMemReference(TraceFileReader* file, duint address);
-#endif //TRACEFILESEARCH_H
+TRACEINDEX TraceFileSearchFuncReturn(TraceFileReader* file, TRACEINDEX start);
+int TraceFileSearchMemPattern(TraceFileReader* file, const QString & pattern);

@@ -1,5 +1,4 @@
-#ifndef FAVOURITETOOLS_H
-#define FAVOURITETOOLS_H
+#pragma once
 
 #include <QDialog>
 
@@ -15,7 +14,7 @@ class FavouriteTools : public QDialog
     Q_OBJECT
 
 public:
-    explicit FavouriteTools(QWidget* parent = 0);
+    explicit FavouriteTools(QWidget* parent = nullptr);
     ~FavouriteTools();
 public slots:
     void on_btnAddFavouriteTool_clicked();
@@ -56,5 +55,3 @@ private:
     void updateScriptsBtnEnabled();
     void updateCommandsBtnEnabled();
 };
-
-#endif // FAVOURITETOOLS_H

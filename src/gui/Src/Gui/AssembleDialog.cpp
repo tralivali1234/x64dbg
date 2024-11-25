@@ -5,6 +5,7 @@
 #include "Configuration.h"
 
 bool AssembleDialog::bWarningShowedOnce = false;
+#define ASSEMBLE_ERROR (-1337)
 
 AssembleDialog::AssembleDialog(QWidget* parent) :
     QDialog(parent),
@@ -33,14 +34,14 @@ AssembleDialog::AssembleDialog(QWidget* parent) :
             ui->radioAsmjit->setChecked(true);
     }
 
-    Config()->setupWindowPos(this);
+    Config()->loadWindowGeometry(this);
 }
 
 AssembleDialog::~AssembleDialog()
 {
     mValidateThread->stop();
     mValidateThread->wait();
-    Config()->saveWindowPos(this);
+    Config()->saveWindowGeometry(this);
     delete ui;
 }
 
@@ -79,9 +80,12 @@ void AssembleDialog::setOkButtonEnabled(bool enabled)
 
 void AssembleDialog::validateInstruction(QString expression)
 {
-    if(!ui->lineEdit->text().length())
+    //sanitize the expression (just simplifying it by removing excess whitespaces)
+    expression = expression.simplified();
+
+    if(!expression.length())
     {
-        emit mValidateThread->emitInstructionChanged(0, tr("empty instruction"));
+        emit mValidateThread->emitInstructionChanged(ASSEMBLE_ERROR, tr("empty instruction"));
         return;
     }
     //void instructionChanged(bool validInstruction, dsint sizeDifference, QString error)
@@ -90,6 +94,7 @@ void AssembleDialog::validateInstruction(QString expression)
     int selectedInstructionSize = 0;
     bool validInstruction = false;
     QByteArray error(MAX_ERROR_SIZE, 0);
+    QByteArray opcode(16, 0);
     BASIC_INSTRUCTION_INFO basicInstrInfo;
 
     // Get selected instruction info (size here)
@@ -97,9 +102,9 @@ void AssembleDialog::validateInstruction(QString expression)
     selectedInstructionSize = basicInstrInfo.size;
 
     // Get typed in instruction size
-    if(!DbgFunctions()->Assemble(mSelectedInstrVa, NULL, &typedInstructionSize, ui->lineEdit->text().toUtf8().constData(), error.data())  || selectedInstructionSize == 0)
+    if(!DbgFunctions()->Assemble(mSelectedInstrVa, (unsigned char*)opcode.data(), &typedInstructionSize, expression.toUtf8().constData(), error.data())  || selectedInstructionSize == 0)
     {
-        emit mValidateThread->emitInstructionChanged(0, QString(error));
+        emit mValidateThread->emitInstructionChanged(ASSEMBLE_ERROR, QString(error));
         return;
     }
 
@@ -108,7 +113,8 @@ void AssembleDialog::validateInstruction(QString expression)
 
     sizeDifference = typedInstructionSize - selectedInstructionSize;
 
-    emit mValidateThread->emitInstructionChanged(sizeDifference, "");
+    opcode.resize(typedInstructionSize);
+    emit mValidateThread->emitInstructionChanged(sizeDifference, opcode.toHex().toUpper());
 }
 
 void AssembleDialog::textChangedSlot(QString text)
@@ -116,12 +122,12 @@ void AssembleDialog::textChangedSlot(QString text)
     mValidateThread->textChanged(text);
 }
 
-void AssembleDialog::instructionChangedSlot(dsint sizeDifference, QString error)
+void AssembleDialog::instructionChangedSlot(dsint sizeDifference, QString data)
 {
     // If there was an error
-    if(error.length())
+    if(sizeDifference == ASSEMBLE_ERROR)
     {
-        setKeepSizeLabel(tr("<font color='orange'><b>Instruction encoding error: %1</b></font>").arg(error));
+        setKeepSizeLabel(tr("<font color='orange'><b>Instruction encoding error: %1</b></font>").arg(data));
         setOkButtonEnabled(false);
     }
     else if(ui->checkBoxKeepSize->isChecked())
@@ -131,7 +137,7 @@ void AssembleDialog::instructionChangedSlot(dsint sizeDifference, QString error)
         {
             QString message = tr("<font color='red'><b>Instruction bigger by %1 %2...</b></font>")
                               .arg(sizeDifference)
-                              .arg(sizeDifference == 1 ? tr("byte") : tr("bytes"));
+                              .arg(sizeDifference == 1 ? tr("byte") : tr("bytes")).append(tr("<br>Bytes: %1").arg(data));
 
             setKeepSizeLabel(message);
             setOkButtonEnabled(false);
@@ -141,7 +147,7 @@ void AssembleDialog::instructionChangedSlot(dsint sizeDifference, QString error)
         {
             QString message = tr("<font color='#00cc00'><b>Instruction smaller by %1 %2...</b></font>")
                               .arg(-sizeDifference)
-                              .arg(sizeDifference == -1 ? tr("byte") : tr("bytes"));
+                              .arg(sizeDifference == -1 ? tr("byte") : tr("bytes")).append(tr("<br>Bytes: %1").arg(data));
 
             setKeepSizeLabel(message);
             setOkButtonEnabled(true);
@@ -149,7 +155,7 @@ void AssembleDialog::instructionChangedSlot(dsint sizeDifference, QString error)
         // SizeDifference == 0 <=> Both instruction have same size
         else
         {
-            QString message = tr("<font color='#00cc00'><b>Instruction is same size!</b></font>");
+            QString message = tr("<font color='#00cc00'><b>Instruction is same size!</b></font>").append(tr("<br>Bytes: %1").arg(data));
 
             setKeepSizeLabel(message);
             setOkButtonEnabled(true);
@@ -157,7 +163,7 @@ void AssembleDialog::instructionChangedSlot(dsint sizeDifference, QString error)
     }
     else
     {
-        QString message = tr("<font color='#00cc00'><b>Instruction encoded successfully!</b></font>");
+        QString message = tr("<font color='#00cc00'><b>Instruction encoded successfully!</b></font>").append(tr("<br>Bytes: %1").arg(data));
 
         setKeepSizeLabel(message);
         setOkButtonEnabled(true);

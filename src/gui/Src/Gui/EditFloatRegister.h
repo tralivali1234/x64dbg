@@ -1,5 +1,4 @@
-#ifndef EDITFLOATREGISTER_H
-#define EDITFLOATREGISTER_H
+#pragma once
 
 #include <QDialog>
 #include <QLineEdit>
@@ -17,9 +16,9 @@ class EditFloatRegister : public QDialog
     Q_OBJECT
 
 public:
-    explicit EditFloatRegister(int RegisterSize, QWidget* parent = 0);
-    void loadData(char* RegisterData);
-    const char* getData();
+    explicit EditFloatRegister(int RegisterSize, QWidget* parent = nullptr);
+    void loadData(const char* RegisterData);
+    const char* getData() const;
     void selectAllText();
 
     ~EditFloatRegister();
@@ -99,9 +98,7 @@ private:
     void editingLongLongFinishedSlot(size_t offset, QString arg);
 
     Ui::EditFloatRegister* ui;
-    QObject* mutex;
+    QObject* mutex = nullptr;
     char Data[64];
     int RegSize;
 };
-
-#endif // EDITFLOATREGISTER_H

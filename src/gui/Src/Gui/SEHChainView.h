@@ -1,5 +1,4 @@
-#ifndef SEHCHAINVIEW_H
-#define SEHCHAINVIEW_H
+#pragma once
 
 #include "StdTable.h"
 
@@ -7,7 +6,7 @@ class SEHChainView : public StdTable
 {
     Q_OBJECT
 public:
-    explicit SEHChainView(StdTable* parent = 0);
+    explicit SEHChainView(StdTable* parent = nullptr);
     void setupContextMenu();
 
 protected slots:
@@ -21,5 +20,3 @@ private:
     QAction* mFollowAddress;
     QAction* mFollowHandler;
 };
-
-#endif // SEHCHAINVIEW_H

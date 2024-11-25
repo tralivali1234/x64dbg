@@ -1,5 +1,5 @@
-#ifndef WATCHVIEW_H
-#define WATCHVIEW_H
+#pragma once
+
 #include "StdTable.h"
 
 class CPUMultiDump;
@@ -10,7 +10,7 @@ class WatchView : public StdTable
 public:
     WatchView(CPUMultiDump* parent);
 
-    QString paintContent(QPainter* painter, dsint rowBase, int rowOffset, int col, int x, int y, int w, int h) override;
+    QString paintContent(QPainter* painter, duint row, duint col, int x, int y, int w, int h) override;
     void updateColors() override;
 
 public slots:
@@ -26,6 +26,11 @@ public slots:
     void watchdogUnchangedSlot();
     void watchdogIsTrueSlot();
     void watchdogIsFalseSlot();
+    void setTypeUintSlot();
+    void setTypeIntSlot();
+    void setTypeFloatSlot();
+    void setTypeAsciiSlot();
+    void setTypeUnicodeSlot();
 
 protected:
     void setupContextMenu();
@@ -35,6 +40,15 @@ protected:
     MenuBuilder* mMenu;
     QPen mWatchTriggeredColor;
     QBrush mWatchTriggeredBackgroundColor;
-};
 
-#endif // WATCHVIEW_H
+private:
+    enum
+    {
+        ColName = 0,
+        ColExpr,
+        ColValue,
+        ColType,
+        ColWatchdog,
+        ColId
+    };
+};

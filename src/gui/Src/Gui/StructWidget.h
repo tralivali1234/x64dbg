@@ -1,5 +1,4 @@
-#ifndef STRUCTWIDGET_H
-#define STRUCTWIDGET_H
+#pragma once
 
 #include <QWidget>
 #include "Bridge.h"
@@ -18,8 +17,10 @@ class StructWidget : public QWidget, public ActionHelper<StructWidget>
     Q_OBJECT
 
 public:
-    explicit StructWidget(QWidget* parent = 0);
+    explicit StructWidget(QWidget* parent = nullptr);
     ~StructWidget();
+    void saveWindowSettings();
+    void loadWindowSettings();
 
 public slots:
     void colorsUpdatedSlot();
@@ -35,14 +36,28 @@ private:
     Ui::StructWidget* ui;
     MenuBuilder* mMenuBuilder;
     GotoDialog* mGotoDialog = nullptr;
+    QColor mTextColor;
 
     void setupColumns();
     void setupContextMenu();
+    QString highlightTypeName(QString name) const;
+    duint selectedValue() const;
+
+    enum
+    {
+        ColField,
+        ColOffset,
+        ColAddress,
+        ColSize,
+        ColValue,
+    };
 
 private slots:
     void on_treeWidget_customContextMenuRequested(const QPoint & pos);
 
     void followDumpSlot();
+    void followValueDumpSlot();
+    void followValueDisasmSlot();
     void clearSlot();
     void removeSlot();
     void visitSlot();
@@ -50,6 +65,5 @@ private slots:
     void parseFileSlot();
     void changeAddrSlot();
     void refreshSlot();
+    void copyColumnSlot();
 };
-
-#endif // STRUCTWIDGET_H

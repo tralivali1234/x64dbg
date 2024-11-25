@@ -1,5 +1,4 @@
-#ifndef MESSAGESBREAKPOINTS_H
-#define MESSAGESBREAKPOINTS_H
+#pragma once
 
 #include <QDialog>
 #include <QLayout>
@@ -22,7 +21,7 @@ public:
         QString procVA;
         QString wndHandle;
     };
-    explicit MessagesBreakpoints(MsgBreakpointData pbpData, QWidget* parent = 0);
+    explicit MessagesBreakpoints(MsgBreakpointData pbpData, QWidget* parent = nullptr);
     ~MessagesBreakpoints();
     MsgBreakpointData bpData;
 
@@ -34,5 +33,3 @@ private:
     QMap<duint, QString> messages;
     QVector<QString> filterMessages;
 };
-
-#endif // MESSAGESBREAKPOINTS_H

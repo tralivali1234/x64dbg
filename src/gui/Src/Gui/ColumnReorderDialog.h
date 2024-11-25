@@ -1,5 +1,4 @@
-#ifndef COLUMNREORDERDIALOG_H
-#define COLUMNREORDERDIALOG_H
+#pragma once
 
 #include <QDialog>
 
@@ -15,7 +14,7 @@ class ColumnReorderDialog : public QDialog
     Q_OBJECT
 
 public:
-    explicit ColumnReorderDialog(AbstractTableView* parent = 0);
+    explicit ColumnReorderDialog(AbstractTableView* parent = nullptr);
     ~ColumnReorderDialog();
 
 private slots:
@@ -30,5 +29,3 @@ private:
     Ui::ColumnReorderDialog* ui;
     AbstractTableView* mParent;
 };
-
-#endif // COLUMNREORDERDIALOG_H

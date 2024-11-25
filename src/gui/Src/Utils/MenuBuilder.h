@@ -1,5 +1,4 @@
-#ifndef MENUBUILDER
-#define MENUBUILDER
+#pragma once
 
 #include <QAction>
 #include <QMenu>
@@ -116,7 +115,7 @@ private:
     BuildCallback _callback;
     QString id;
     std::vector<Container> _containers;
+private slots:
+    void unregisterMenuBuilder();
 };
-
-#endif // MENUBUILDER
 

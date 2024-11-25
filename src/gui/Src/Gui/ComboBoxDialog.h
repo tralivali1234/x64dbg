@@ -1,5 +1,4 @@
-#ifndef COMBOBOXDIALOG_H
-#define COMBOBOXDIALOG_H
+#pragma once
 
 #include <QDialog>
 
@@ -13,7 +12,7 @@ class ComboBoxDialog : public QDialog
     Q_OBJECT
 
 public:
-    explicit ComboBoxDialog(QWidget* parent = 0);
+    explicit ComboBoxDialog(QWidget* parent = nullptr);
     ~ComboBoxDialog();
     bool bChecked;
     QString currentText();
@@ -34,5 +33,3 @@ private slots:
 private:
     Ui::ComboBoxDialog* ui;
 };
-
-#endif // COMBOBOXDIALOG_H

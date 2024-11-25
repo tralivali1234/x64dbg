@@ -10,7 +10,7 @@ XrefBrowseDialog::XrefBrowseDialog(QWidget* parent) :
 {
     ui->setupUi(this);
     setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint | Qt::MSWindowsFixedSizeDialogHint);
-    setWindowIcon(DIcon("xrefs.png"));
+    setWindowIcon(DIcon("xrefs"));
     setModal(false);
     mXrefInfo.refcount = 0;
     ui->listWidget->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -39,15 +39,15 @@ QString XrefBrowseDialog::GetFunctionSymbol(duint addr)
     return line;
 }
 
-void XrefBrowseDialog::setup(duint address, QString command)
+void XrefBrowseDialog::setup(duint address, GotoFunction gotoFunction)
 {
     if(mXrefInfo.refcount)
     {
         BridgeFree(mXrefInfo.references);
         mXrefInfo.refcount = 0;
     }
-    mCommand = command;
     mAddress = address;
+    mGotoFunction = std::move(gotoFunction);
     mPrevSelectionSize = 0;
     ui->listWidget->clear();
     if(DbgXrefGet(address, &mXrefInfo))
@@ -85,40 +85,40 @@ void XrefBrowseDialog::setup(duint address, QString command)
 void XrefBrowseDialog::setupContextMenu()
 {
     mMenu = new MenuBuilder(this);
-    mMenu->addAction(makeAction(DIcon("breakpoint_toggle.png"), tr("Toggle &Breakpoint"), SLOT(breakpointSlot())));
+    mMenu->addAction(makeAction(DIcon("breakpoint_toggle"), tr("Toggle &Breakpoint"), SLOT(breakpointSlot())));
     //Breakpoint (hardware access) menu
-    auto hardwareAccessMenu = makeMenu(DIcon("breakpoint_access.png"), tr("Hardware, Access"));
-    hardwareAccessMenu->addAction(makeAction(DIcon("breakpoint_byte.png"), tr("&Byte"), SLOT(hardwareAccess1Slot())));
-    hardwareAccessMenu->addAction(makeAction(DIcon("breakpoint_word.png"), tr("&Word"), SLOT(hardwareAccess2Slot())));
-    hardwareAccessMenu->addAction(makeAction(DIcon("breakpoint_dword.png"), tr("&Dword"), SLOT(hardwareAccess4Slot())));
+    auto hardwareAccessMenu = makeMenu(DIcon("breakpoint_access"), tr("Hardware, Access"));
+    hardwareAccessMenu->addAction(makeAction(DIcon("breakpoint_byte"), tr("&Byte"), SLOT(hardwareAccess1Slot())));
+    hardwareAccessMenu->addAction(makeAction(DIcon("breakpoint_word"), tr("&Word"), SLOT(hardwareAccess2Slot())));
+    hardwareAccessMenu->addAction(makeAction(DIcon("breakpoint_dword"), tr("&Dword"), SLOT(hardwareAccess4Slot())));
 #ifdef _WIN64
-    hardwareAccessMenu->addAction(makeAction(DIcon("breakpoint_qword.png"), tr("&Qword"), SLOT(hardwareAccess8Slot())));
+    hardwareAccessMenu->addAction(makeAction(DIcon("breakpoint_qword"), tr("&Qword"), SLOT(hardwareAccess8Slot())));
 #endif //_WIN64
 
     //Breakpoint (hardware write) menu
-    auto hardwareWriteMenu = makeMenu(DIcon("breakpoint_write.png"), tr("Hardware, Write"));
-    hardwareWriteMenu->addAction(makeAction(DIcon("breakpoint_byte.png"), tr("&Byte"), SLOT(hardwareWrite1Slot())));
-    hardwareWriteMenu->addAction(makeAction(DIcon("breakpoint_word.png"), tr("&Word"), SLOT(hardwareWrite2Slot())));
-    hardwareWriteMenu->addAction(makeAction(DIcon("breakpoint_dword.png"), tr("&Dword"), SLOT(hardwareWrite4Slot())));
+    auto hardwareWriteMenu = makeMenu(DIcon("breakpoint_write"), tr("Hardware, Write"));
+    hardwareWriteMenu->addAction(makeAction(DIcon("breakpoint_byte"), tr("&Byte"), SLOT(hardwareWrite1Slot())));
+    hardwareWriteMenu->addAction(makeAction(DIcon("breakpoint_word"), tr("&Word"), SLOT(hardwareWrite2Slot())));
+    hardwareWriteMenu->addAction(makeAction(DIcon("breakpoint_dword"), tr("&Dword"), SLOT(hardwareWrite4Slot())));
 #ifdef _WIN64
-    hardwareWriteMenu->addAction(makeAction(DIcon("breakpoint_qword.png"), tr("&Qword"), SLOT(hardwareAccess8Slot())));
+    hardwareWriteMenu->addAction(makeAction(DIcon("breakpoint_qword"), tr("&Qword"), SLOT(hardwareAccess8Slot())));
 #endif //_WIN64
 
     //Breakpoint (remove hardware)
-    auto hardwareRemove = makeAction(DIcon("breakpoint_remove.png"), tr("Remove &Hardware"), SLOT(hardwareRemoveSlot()));
+    auto hardwareRemove = makeAction(DIcon("breakpoint_remove"), tr("Remove &Hardware"), SLOT(hardwareRemoveSlot()));
 
     //Breakpoint (memory access) menu
-    auto memoryAccessMenu = makeMenu(DIcon("breakpoint_memory_access.png"), tr("Memory, Access"));
-    memoryAccessMenu->addAction(makeAction(DIcon("breakpoint_memory_singleshoot.png"), tr("&Singleshoot"), SLOT(memoryAccessSingleshootSlot())));
-    memoryAccessMenu->addAction(makeAction(DIcon("breakpoint_memory_restore_on_hit.png"), tr("&Restore on hit"), SLOT(memoryAccessRestoreSlot())));
+    auto memoryAccessMenu = makeMenu(DIcon("breakpoint_memory_access"), tr("Memory, Access"));
+    memoryAccessMenu->addAction(makeAction(DIcon("breakpoint_memory_singleshoot"), tr("&Singleshoot"), SLOT(memoryAccessSingleshootSlot())));
+    memoryAccessMenu->addAction(makeAction(DIcon("breakpoint_memory_restore_on_hit"), tr("&Restore on hit"), SLOT(memoryAccessRestoreSlot())));
 
     //Breakpoint (memory write) menu
-    auto memoryWriteMenu = makeMenu(DIcon("breakpoint_memory_write.png"), tr("Memory, Write"));
-    memoryWriteMenu->addAction(makeAction(DIcon("breakpoint_memory_singleshoot.png"), tr("&Singleshoot"), SLOT(memoryWriteSingleshootSlot())));
-    memoryWriteMenu->addAction(makeAction(DIcon("breakpoint_memory_restore_on_hit.png"), tr("&Restore on hit"), SLOT(memoryWriteRestoreSlot())));
+    auto memoryWriteMenu = makeMenu(DIcon("breakpoint_memory_write"), tr("Memory, Write"));
+    memoryWriteMenu->addAction(makeAction(DIcon("breakpoint_memory_singleshoot"), tr("&Singleshoot"), SLOT(memoryWriteSingleshootSlot())));
+    memoryWriteMenu->addAction(makeAction(DIcon("breakpoint_memory_restore_on_hit"), tr("&Restore on hit"), SLOT(memoryWriteRestoreSlot())));
 
     //Breakpoint (remove memory) menu
-    auto memoryRemove = makeAction(DIcon("breakpoint_remove.png"), tr("Remove &Memory"), SLOT(memoryRemoveSlot()));
+    auto memoryRemove = makeAction(DIcon("breakpoint_remove"), tr("Remove &Memory"), SLOT(memoryRemoveSlot()));
 
     //Breakpoint menu
     auto breakpointMenu = new MenuBuilder(this);
@@ -150,18 +150,18 @@ void XrefBrowseDialog::setupContextMenu()
         }
         return true;
     }));
-    mMenu->addMenu(makeMenu(DIcon("breakpoint.png"), tr("Brea&kpoint")), breakpointMenu);
-    mMenu->addAction(makeAction(DIcon("breakpoint_toggle.png"), tr("Toggle breakpoints on all xrefs"), SLOT(breakpointAllSlot())));
+    mMenu->addMenu(makeMenu(DIcon("breakpoint"), tr("Brea&kpoint")), breakpointMenu);
+    mMenu->addAction(makeAction(DIcon("breakpoint_toggle"), tr("Toggle breakpoints on all xrefs"), SLOT(breakpointAllSlot())));
     auto mCopyMenu = new MenuBuilder(mMenu);
     mCopyMenu->addAction(makeAction(tr("Selected xref"), SLOT(copyThisSlot())));
     mCopyMenu->addAction(makeAction(tr("All xrefs"), SLOT(copyAllSlot())));
-    mMenu->addMenu(makeMenu(DIcon("copy.png"), tr("Copy")), mCopyMenu);
+    mMenu->addMenu(makeMenu(DIcon("copy"), tr("Copy")), mCopyMenu);
     mMenu->loadFromConfig();
 }
 
 void XrefBrowseDialog::changeAddress(duint address)
 {
-    DbgCmdExec(QString("%1 %2").arg(mCommand, ToPtrString(address)).toUtf8().constData());
+    mGotoFunction(address);
 }
 
 XrefBrowseDialog::~XrefBrowseDialog()
@@ -203,7 +203,7 @@ void XrefBrowseDialog::on_listWidget_currentRowChanged(int row)
 void XrefBrowseDialog::on_XrefBrowseDialog_rejected()
 {
     if(DbgIsDebugging())
-        DbgCmdExec(QString("%1 %2").arg(mCommand, ToPtrString(mAddress)).toUtf8().constData());
+        mGotoFunction(mAddress);
 }
 
 void XrefBrowseDialog::on_listWidget_itemClicked(QListWidgetItem*)
@@ -230,95 +230,95 @@ void XrefBrowseDialog::onDebuggerClose(DBGSTATE state)
 
 void XrefBrowseDialog::breakpointSlot()
 {
-    QString addr_text = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
+    QString addrText = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
     if(DbgGetBpxTypeAt(mXrefInfo.references[ui->listWidget->currentRow()].addr) & bp_normal)
-        DbgCmdExec(QString("bc " + addr_text).toUtf8().constData());
+        DbgCmdExec(QString("bc " + addrText));
     else
-        DbgCmdExec(QString("bp " + addr_text).toUtf8().constData());
+        DbgCmdExec(QString("bp " + addrText));
 }
 
 void XrefBrowseDialog::hardwareAccess1Slot()
 {
-    QString addr_text = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
-    DbgCmdExec(QString("bphws " + addr_text + ", r, 1").toUtf8().constData());
+    QString addrText = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
+    DbgCmdExec(QString("bphws " + addrText + ", r, 1"));
 }
 
 void XrefBrowseDialog::hardwareAccess2Slot()
 {
-    QString addr_text = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
-    DbgCmdExec(QString("bphws " + addr_text + ", r, 2").toUtf8().constData());
+    QString addrText = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
+    DbgCmdExec(QString("bphws " + addrText + ", r, 2"));
 }
 
 void XrefBrowseDialog::hardwareAccess4Slot()
 {
-    QString addr_text = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
-    DbgCmdExec(QString("bphws " + addr_text + ", r, 4").toUtf8().constData());
+    QString addrText = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
+    DbgCmdExec(QString("bphws " + addrText + ", r, 4"));
 }
 
 void XrefBrowseDialog::hardwareAccess8Slot()
 {
-    QString addr_text = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
-    DbgCmdExec(QString("bphws " + addr_text + ", r, 8").toUtf8().constData());
+    QString addrText = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
+    DbgCmdExec(QString("bphws " + addrText + ", r, 8"));
 }
 
 void XrefBrowseDialog::hardwareWrite1Slot()
 {
-    QString addr_text = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
-    DbgCmdExec(QString("bphws " + addr_text + ", w, 1").toUtf8().constData());
+    QString addrText = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
+    DbgCmdExec(QString("bphws " + addrText + ", w, 1"));
 }
 
 void XrefBrowseDialog::hardwareWrite2Slot()
 {
-    QString addr_text = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
-    DbgCmdExec(QString("bphws " + addr_text + ", w, 2").toUtf8().constData());
+    QString addrText = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
+    DbgCmdExec(QString("bphws " + addrText + ", w, 2"));
 }
 
 void XrefBrowseDialog::hardwareWrite4Slot()
 {
-    QString addr_text = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
-    DbgCmdExec(QString("bphws " + addr_text + ", w, 4").toUtf8().constData());
+    QString addrText = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
+    DbgCmdExec(QString("bphws " + addrText + ", w, 4"));
 }
 
 void XrefBrowseDialog::hardwareWrite8Slot()
 {
-    QString addr_text = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
-    DbgCmdExec(QString("bphws " + addr_text + ", w, 8").toUtf8().constData());
+    QString addrText = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
+    DbgCmdExec(QString("bphws " + addrText + ", w, 8"));
 }
 
 void XrefBrowseDialog::hardwareRemoveSlot()
 {
-    QString addr_text = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
-    DbgCmdExec(QString("bphwc " + addr_text).toUtf8().constData());
+    QString addrText = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
+    DbgCmdExec(QString("bphwc " + addrText));
 }
 
 void XrefBrowseDialog::memoryAccessSingleshootSlot()
 {
-    QString addr_text = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
-    DbgCmdExec(QString("bpm " + addr_text + ", 0, a").toUtf8().constData());
+    QString addrText = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
+    DbgCmdExec(QString("bpm " + addrText + ", 0, a"));
 }
 
 void XrefBrowseDialog::memoryAccessRestoreSlot()
 {
-    QString addr_text = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
-    DbgCmdExec(QString("bpm " + addr_text + ", 1, a").toUtf8().constData());
+    QString addrText = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
+    DbgCmdExec(QString("bpm " + addrText + ", 1, a"));
 }
 
 void XrefBrowseDialog::memoryWriteSingleshootSlot()
 {
-    QString addr_text = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
-    DbgCmdExec(QString("bpm " + addr_text + ", 0, w").toUtf8().constData());
+    QString addrText = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
+    DbgCmdExec(QString("bpm " + addrText + ", 0, w"));
 }
 
 void XrefBrowseDialog::memoryWriteRestoreSlot()
 {
-    QString addr_text = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
-    DbgCmdExec(QString("bpm " + addr_text + ", 1, w").toUtf8().constData());
+    QString addrText = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
+    DbgCmdExec(QString("bpm " + addrText + ", 1, w"));
 }
 
 void XrefBrowseDialog::memoryRemoveSlot()
 {
-    QString addr_text = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
-    DbgCmdExec(QString("bpmc " + addr_text).toUtf8().constData());
+    QString addrText = ToPtrString(mXrefInfo.references[ui->listWidget->currentRow()].addr);
+    DbgCmdExec(QString("bpmc " + addrText));
 }
 
 void XrefBrowseDialog::copyThisSlot()
@@ -330,11 +330,11 @@ void XrefBrowseDialog::breakpointAllSlot()
 {
     for(int i = 0; i < ui->listWidget->count(); i++)
     {
-        QString addr_text = ToPtrString(mXrefInfo.references[i].addr);
+        QString addrText = ToPtrString(mXrefInfo.references[i].addr);
         if(DbgGetBpxTypeAt(mXrefInfo.references[i].addr) & bp_normal)
-            DbgCmdExec(QString("bc " + addr_text).toUtf8().constData());
+            DbgCmdExec(QString("bc " + addrText));
         else
-            DbgCmdExec(QString("bp " + addr_text).toUtf8().constData());
+            DbgCmdExec(QString("bp " + addrText));
     }
 }
 

@@ -1,22 +1,22 @@
-#ifndef TRACEBROWSER_H
-#define TRACEBROWSER_H
+#pragma once
 
 #include "AbstractTableView.h"
 #include "VaHistory.h"
-#include "QBeaEngine.h"
+#include "QZydis.h"
+#include "TraceFileReader.h"
 
-class TraceFileReader;
+class TraceWidget;
 class BreakpointMenu;
-class MRUList;
+class CommonActions;
 
 class TraceBrowser : public AbstractTableView
 {
     Q_OBJECT
 public:
-    explicit TraceBrowser(QWidget* parent = 0);
+    explicit TraceBrowser(TraceFileReader* traceFile, TraceWidget* parent = nullptr);
     ~TraceBrowser() override;
 
-    QString paintContent(QPainter* painter, dsint rowBase, int rowOffset, int col, int x, int y, int w, int h) override;
+    QString paintContent(QPainter* painter, duint row, duint col, int x, int y, int w, int h) override;
 
     void prepareData() override;
     void updateColors() override;
@@ -27,6 +27,12 @@ public:
     duint getSelectionSize();
     duint getSelectionStart();
     duint getSelectionEnd();
+
+    bool isFileOpened() const;
+    TraceFileReader* getTraceFile() { return mTraceFile; }
+
+    static bool isRecording();
+    static bool toggleTraceRecording(QWidget* parent);
 
 private:
     enum TableColumnIndex
@@ -42,7 +48,6 @@ private:
     void setupRightClickContextMenu();
     void makeVisible(duint index);
     QString getAddrText(dsint cur_addr, char label[MAX_LABEL_SIZE], bool getLabel);
-    QString getIndexText(duint index) const;
     RichTextPainter::List getRichBytes(const Instruction_t & instr) const;
     void pushSelectionInto(bool copyBytes, QTextStream & stream, QTextStream* htmlStream = nullptr);
     void copySelectionSlot(bool copyBytes);
@@ -54,10 +59,11 @@ private:
     void mouseDoubleClickEvent(QMouseEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
 
-    ZydisTokenizer::InstructionToken memoryTokens(int atIndex);
-    ZydisTokenizer::InstructionToken registersTokens(int atIndex);
+    ZydisTokenizer::InstructionToken memoryTokens(TRACEINDEX atIndex);
+    ZydisTokenizer::InstructionToken registersTokens(TRACEINDEX atIndex);
     VaHistory mHistory;
     MenuBuilder* mMenuBuilder;
+    CommonActions* mCommonActions;
     bool mRvaDisplayEnabled;
     duint mRvaDisplayBase;
 
@@ -72,19 +78,17 @@ private:
     ZydisTokenizer::SingleToken mHighlightToken;
     bool mHighlightingMode;
     bool mPermanentHighlightingMode;
-    bool mAutoDisassemblyFollowSelection;
+    bool mTraceSyncCpu;
+    bool mShowMnemonicBrief;
 
     TraceFileReader* mTraceFile;
-    QBeaEngine* mDisasm;
     BreakpointMenu* mBreakpointMenu;
-    MRUList* mMRUList;
     QString mFileName;
 
     QColor mBytesColor;
     QColor mBytesBackgroundColor;
 
     QColor mInstructionHighlightColor;
-    QColor mSelectionColor;
 
     QColor mCipBackgroundColor;
     QColor mCipColor;
@@ -106,6 +110,7 @@ private:
     QColor mSelectedAddressColor;
     QColor mAddressBackgroundColor;
     QColor mAddressColor;
+    QColor mTracedSelectedAddressBackgroundColor;
 
     QColor mAutoCommentColor;
     QColor mAutoCommentBackgroundColor;
@@ -113,25 +118,58 @@ private:
     QColor mCommentBackgroundColor;
     QColor mDisassemblyRelocationUnderlineColor;
 
+    QColor mMnemonicBriefColor;
+    QColor mMnemonicBriefBackgroundColor;
+
+    QColor mConditionalJumpLineTrueColor;
+
+    QColor mLoopColor;
+    QColor mFunctionColor;
+
+    QPen mLoopPen;
+    QPen mFunctionPen;
+    QPen mConditionalTruePen;
+
+    // Function Graphic
+
+    enum Function_t
+    {
+        Function_none,
+        Function_single,
+        Function_start,
+        Function_middle,
+        Function_loop_entry,
+        Function_end
+    };
+
+    int paintFunctionGraphic(QPainter* painter, int x, int y, Function_t funcType, bool loop);
+
 signals:
-    void displayReferencesWidget();
+    void displayLogWidget();
+    void selectionChanged(TRACEINDEX selection);
+    void xrefSignal(duint addr);
+    void closeFile();
 
 public slots:
     void openFileSlot();
     void openSlot(const QString & fileName);
-    void toggleRunTraceSlot();
+    void browseInExplorerSlot();
+    void toggleTraceRecordingSlot();
     void closeFileSlot();
     void closeDeleteSlot();
     void parseFinishedSlot();
     void tokenizerConfigUpdatedSlot();
+    void selectionChangedSlot(TRACEINDEX selection);
 
     void gotoSlot();
+    void gotoIndexSlot();
+    void rtrSlot();
     void gotoPreviousSlot();
     void gotoNextSlot();
-    void followDisassemblySlot();
+    void gotoXrefSlot();
     void enableHighlightingModeSlot();
-    void setLabelSlot();
-    void setCommentSlot();
+    void mnemonicBriefSlot();
+    void mnemonicHelpSlot();
     void copyDisassemblySlot();
     void copyCipSlot();
     void copyIndexSlot();
@@ -141,13 +179,22 @@ public slots:
     void copySelectionToFileNoBytesSlot();
     void copyFileOffsetSlot();
     void copyRvaSlot();
+    void exportSlot();
 
     void searchConstantSlot();
     void searchMemRefSlot();
 
-    void updateSlot(); //debug
+    void updateSlot();
 
-    void toggleAutoDisassemblyFollowSelectionSlot();
+    void synchronizeCpuSlot();
+    void gotoIndexSlot(duint index);
+    void gotoAddressSlot(duint index);
+
+private:
+    // Go to by index
+    void disasm(TRACEINDEX index, bool history = true);
+    // Go to by address, display the Xref dialog if multiple indicies are found
+    void disasmByAddress(duint address, bool history = true);
+    TraceWidget* mParent;
 };
 
-#endif //TRACEBROWSER_H

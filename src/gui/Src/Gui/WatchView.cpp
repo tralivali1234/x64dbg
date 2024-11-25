@@ -33,28 +33,28 @@ void WatchView::updateWatch()
     BridgeList<WATCHINFO> WatchList;
     DbgGetWatchList(&WatchList);
     setRowCount(WatchList.Count());
-    if(getInitialSelection() >= WatchList.Count() && WatchList.Count() > 0)
+    if(getInitialSelection() >= (duint)WatchList.Count() && WatchList.Count() > 0)
         setSingleSelection(WatchList.Count() - 1);
     for(int i = 0; i < WatchList.Count(); i++)
     {
-        setCellContent(i, 0, QString(WatchList[i].WatchName));
-        setCellContent(i, 1, QString(WatchList[i].Expression));
+        setCellContent(i, ColName, QString(WatchList[i].WatchName));
+        setCellContent(i, ColExpr, QString(WatchList[i].Expression));
         switch(WatchList[i].varType)
         {
         case WATCHVARTYPE::TYPE_UINT:
-            setCellContent(i, 3, "UINT");
-            setCellContent(i, 2, ToPtrString(WatchList[i].value));
+            setCellContent(i, ColType, "UINT");
+            setCellContent(i, ColValue, ToPtrString(WatchList[i].value));
             break;
         case WATCHVARTYPE::TYPE_INT:
-            setCellContent(i, 3, "INT");
-            setCellContent(i, 2, QString::number((dsint)WatchList[i].value));
+            setCellContent(i, ColType, "INT");
+            setCellContent(i, ColValue, QString::number((dsint)WatchList[i].value));
             break;
         case WATCHVARTYPE::TYPE_FLOAT:
-            setCellContent(i, 3, "FLOAT");
-            setCellContent(i, 2, ToFloatString(&WatchList[i].value));
+            setCellContent(i, ColType, "FLOAT");
+            setCellContent(i, ColValue, ToFloatString(&WatchList[i].value));
             break;
         case WATCHVARTYPE::TYPE_ASCII:
-            setCellContent(i, 3, "ASCII");
+            setCellContent(i, ColType, "ASCII");
             {
                 char buffer[128];
                 // zero the buffer
@@ -68,14 +68,14 @@ void WatchView::updateWatch()
                     // remove CRLF
                     text.replace(QChar('\x13'), "\\r");
                     text.replace(QChar('\x10'), "\\n");
-                    setCellContent(i, 2, text);
+                    setCellContent(i, ColValue, text);
                 }
                 else
-                    setCellContent(i, 2, tr("%1 is not readable.").arg(ToPtrString(WatchList[i].value)));
+                    setCellContent(i, ColValue, tr("%1 is not readable.").arg(ToPtrString(WatchList[i].value)));
             }
             break;
         case WATCHVARTYPE::TYPE_UNICODE:
-            setCellContent(i, 3, "UNICODE");
+            setCellContent(i, ColType, "UNICODE");
             {
                 unsigned short buffer[128];
                 // zero the buffer
@@ -93,38 +93,38 @@ void WatchView::updateWatch()
                     // remove CRLF
                     text.replace(QChar('\x13'), "\\r");
                     text.replace(QChar('\x10'), "\\n");
-                    setCellContent(i, 2, text);
+                    setCellContent(i, ColValue, text);
                 }
                 else
-                    setCellContent(i, 2, tr("%1 is not readable.").arg(ToPtrString(WatchList[i].value)));
+                    setCellContent(i, ColValue, tr("%1 is not readable.").arg(ToPtrString(WatchList[i].value)));
             }
             break;
         case WATCHVARTYPE::TYPE_INVALID:
         default:
-            setCellContent(i, 3, "INVALID");
-            setCellContent(i, 2, "");
+            setCellContent(i, ColType, "INVALID");
+            setCellContent(i, ColValue, "");
             break;
         }
         switch(WatchList[i].watchdogMode)
         {
         case WATCHDOGMODE::MODE_DISABLED:
         default:
-            setCellContent(i, 4, tr("Disabled"));
+            setCellContent(i, ColWatchdog, tr("Disabled"));
             break;
         case WATCHDOGMODE::MODE_CHANGED:
-            setCellContent(i, 4, tr("Changed"));
+            setCellContent(i, ColWatchdog, tr("Changed"));
             break;
         case WATCHDOGMODE::MODE_ISTRUE:
-            setCellContent(i, 4, tr("Is true"));
+            setCellContent(i, ColWatchdog, tr("Is true"));
             break;
         case WATCHDOGMODE::MODE_ISFALSE:
-            setCellContent(i, 4, tr("Is false"));
+            setCellContent(i, ColWatchdog, tr("Is false"));
             break;
         case WATCHDOGMODE::MODE_UNCHANGED:
-            setCellContent(i, 4, tr("Not changed"));
+            setCellContent(i, ColWatchdog, tr("Not changed"));
             break;
         }
-        setCellContent(i, 5, QString::number(WatchList[i].id));
+        setCellContent(i, ColId, QString::number(WatchList[i].id));
     }
     reloadData();
 }
@@ -148,36 +148,43 @@ void WatchView::setupContextMenu()
     };
     mMenu->addAction(makeAction(tr("&Add..."), SLOT(addWatchSlot())));
     mMenu->addAction(makeShortcutAction(tr("&Delete"), SLOT(delWatchSlot()), "ActionDeleteBreakpoint"), nonEmptyFunc);
-    mMenu->addAction(makeAction(DIcon("labels.png"), tr("Rename"), SLOT(renameWatchSlot())), nonEmptyFunc);
-    mMenu->addAction(makeAction(DIcon("modify.png"), tr("&Edit..."), SLOT(editWatchSlot())), nonEmptyFunc);
-    mMenu->addAction(makeAction(DIcon("modify.png"), tr("&Modify..."), SLOT(modifyWatchSlot())), nonEmptyFunc);
+    mMenu->addAction(makeAction(DIcon("labels"), tr("Rename"), SLOT(renameWatchSlot())), nonEmptyFunc);
+    mMenu->addAction(makeAction(DIcon("modify"), tr("&Edit..."), SLOT(editWatchSlot())), nonEmptyFunc);
+    mMenu->addAction(makeAction(DIcon("modify"), tr("&Modify..."), SLOT(modifyWatchSlot())), nonEmptyFunc);
     MenuBuilder* watchdogBuilder = new MenuBuilder(this, nonEmptyFunc);
     QMenu* watchdogMenu = new QMenu(tr("Watchdog"), this);
-    watchdogMenu->setIcon(DIcon("animal-dog.png"));
-    watchdogBuilder->addAction(makeAction(DIcon("disable.png"), tr("Disabled"), SLOT(watchdogDisableSlot())));
+    watchdogMenu->setIcon(DIcon("animal-dog"));
+    watchdogBuilder->addAction(makeAction(DIcon("disable"), tr("Disabled"), SLOT(watchdogDisableSlot())));
     watchdogBuilder->addSeparator();
-    watchdogBuilder->addAction(makeAction(DIcon("arrow-restart.png"), tr("Changed"), SLOT(watchdogChangedSlot())));
-    watchdogBuilder->addAction(makeAction(DIcon("control-pause.png"), tr("Not changed"), SLOT(watchdogUnchangedSlot())));
-    watchdogBuilder->addAction(makeAction(DIcon("treat_selection_as_tbyte.png"), tr("Is true"), SLOT(watchdogIsTrueSlot()))); // TODO: better icon
-    watchdogBuilder->addAction(makeAction(DIcon("treat_selection_as_fword.png"), tr("Is false"), SLOT(watchdogIsFalseSlot())));
+    watchdogBuilder->addAction(makeAction(DIcon("arrow-restart"), tr("Changed"), SLOT(watchdogChangedSlot())));
+    watchdogBuilder->addAction(makeAction(DIcon("control-pause"), tr("Not changed"), SLOT(watchdogUnchangedSlot())));
+    watchdogBuilder->addAction(makeAction(DIcon("treat_selection_as_tbyte"), tr("Is true"), SLOT(watchdogIsTrueSlot()))); // TODO: better icon
+    watchdogBuilder->addAction(makeAction(DIcon("treat_selection_as_fword"), tr("Is false"), SLOT(watchdogIsFalseSlot())));
     mMenu->addMenu(watchdogMenu, watchdogBuilder);
+    MenuBuilder* typeBuilder = new MenuBuilder(this, nonEmptyFunc);
+    QMenu* typeMenu = new QMenu(tr("Type"), this);
+    typeBuilder->addAction(makeAction(DIcon("integer"), tr("Uint"), SLOT(setTypeUintSlot())));
+    typeBuilder->addAction(makeAction(DIcon("integer"), tr("Int"), SLOT(setTypeIntSlot())));
+    typeBuilder->addAction(makeAction(DIcon("float"), tr("Float"), SLOT(setTypeFloatSlot())));
+    typeBuilder->addAction(makeAction(DIcon("ascii"), tr("Ascii"), SLOT(setTypeAsciiSlot())));
+    typeBuilder->addAction(makeAction(DIcon("ascii-extended"), tr("Unicode"), SLOT(setTypeUnicodeSlot())));
+    mMenu->addMenu(typeMenu, typeBuilder);
     mMenu->addSeparator();
     MenuBuilder* copyMenu = new MenuBuilder(this);
     setupCopyMenu(copyMenu);
-    mMenu->addMenu(makeMenu(DIcon("copy.png"), tr("&Copy")), copyMenu);
+    mMenu->addMenu(makeMenu(DIcon("copy"), tr("&Copy")), copyMenu);
     mMenu->loadFromConfig();
 }
 
 QString WatchView::getSelectedId()
 {
-    return QChar('.') + getCellContent(getInitialSelection(), 5);
+    return QChar('.') + getCellContent(getInitialSelection(), ColId);
 }
 
-QString WatchView::paintContent(QPainter* painter, dsint rowBase, int rowOffset, int col, int x, int y, int w, int h)
+QString WatchView::paintContent(QPainter* painter, duint row, duint col, int x, int y, int w, int h)
 {
-    QString ret = StdTable::paintContent(painter, rowBase, rowOffset, col, x, y, w, h);
-    const dsint row = rowBase + rowOffset;
-    if(row != getInitialSelection() && DbgFunctions()->WatchIsWatchdogTriggered(getCellContent(row, 5).toUInt()))
+    QString ret = StdTable::paintContent(painter, row, col, x, y, w, h);
+    if(row != getInitialSelection() && DbgFunctions()->WatchIsWatchdogTriggered(getCellContent(row, ColId).toUInt()))
     {
         painter->fillRect(QRect(x, y, w, h), mWatchTriggeredBackgroundColor);
         painter->setPen(mWatchTriggeredColor); //white text
@@ -192,31 +199,31 @@ QString WatchView::paintContent(QPainter* painter, dsint rowBase, int rowOffset,
 
 void WatchView::contextMenuSlot(const QPoint & pos)
 {
-    QMenu wMenu(this);
-    mMenu->build(&wMenu);
-    wMenu.exec(mapToGlobal(pos));
+    QMenu menu(this);
+    mMenu->build(&menu);
+    menu.exec(mapToGlobal(pos));
 }
 
 void WatchView::addWatchSlot()
 {
     QString name;
     if(SimpleInputBox(this, tr("Enter the expression to watch"), "", name, tr("Example: [EAX]")))
-        DbgCmdExecDirect(QString("AddWatch ").append(name).toUtf8().constData());
+        DbgCmdExecDirect(QString("AddWatch \"%1\"").arg(DbgCmdEscape(name)));
     updateWatch();
 }
 
 void WatchView::delWatchSlot()
 {
-    DbgCmdExecDirect(QString("DelWatch ").append(getSelectedId()).toUtf8().constData());
+    DbgCmdExecDirect(QString("DelWatch ").append(getSelectedId()));
     updateWatch();
 }
 
 void WatchView::renameWatchSlot()
 {
     QString name;
-    QString originalName = getCellContent(getInitialSelection(), 0);
+    QString originalName = getCellContent(getInitialSelection(), ColName);
     if(SimpleInputBox(this, tr("Enter the name of the watch variable"), originalName, name, originalName))
-        DbgCmdExecDirect(QString("SetWatchName ").append(getSelectedId() + "," + name).toUtf8().constData());
+        DbgCmdExecDirect(QString("SetWatchName %1, \"%2\"").arg(getSelectedId(), DbgCmdEscape(name)));
     updateWatch();
 }
 
@@ -225,7 +232,7 @@ void WatchView::modifyWatchSlot()
     BridgeList<WATCHINFO> WatchList;
     DbgGetWatchList(&WatchList);
     auto sel = getInitialSelection();
-    if(sel > WatchList.Count())
+    if(sel > (duint)WatchList.Count())
         return;
     WordEditDialog modifyDialog(this);
     modifyDialog.setup(tr("Modify \"%1\"").arg(QString(WatchList[sel].WatchName)), WatchList[sel].value, sizeof(duint));
@@ -240,37 +247,69 @@ void WatchView::modifyWatchSlot()
 void WatchView::editWatchSlot()
 {
     QString expr;
-    if(SimpleInputBox(this, tr("Enter the expression to watch"), "", expr, tr("Example: [EAX]")))
-        DbgCmdExecDirect(QString("SetWatchExpression ").append(getSelectedId()).append(",").append(expr).toUtf8().constData());
+    QString originalExpr = getCellContent(getInitialSelection(), ColExpr);
+    QString currentType = getCellContent(getInitialSelection(), ColType);
+    if(SimpleInputBox(this, tr("Enter the expression to watch"), originalExpr, expr, tr("Example: [EAX]")))
+        DbgCmdExecDirect(QString("SetWatchExpression %1, \"%2\", %3").arg(getSelectedId(), DbgCmdEscape(expr), currentType));
     updateWatch();
 }
 
 void WatchView::watchdogDisableSlot()
 {
-    DbgCmdExecDirect(QString("SetWatchdog %1, \"disabled\"").arg(getSelectedId()).toUtf8().constData());
+    DbgCmdExecDirect(QString("SetWatchdog %1, \"disabled\"").arg(getSelectedId()));
     updateWatch();
 }
 
 void WatchView::watchdogChangedSlot()
 {
-    DbgCmdExecDirect(QString("SetWatchdog %1, \"changed\"").arg(getSelectedId()).toUtf8().constData());
+    DbgCmdExecDirect(QString("SetWatchdog %1, \"changed\"").arg(getSelectedId()));
     updateWatch();
 }
 
 void WatchView::watchdogUnchangedSlot()
 {
-    DbgCmdExecDirect(QString("SetWatchdog %1, \"unchanged\"").arg(getSelectedId()).toUtf8().constData());
+    DbgCmdExecDirect(QString("SetWatchdog %1, \"unchanged\"").arg(getSelectedId()));
     updateWatch();
 }
 
 void WatchView::watchdogIsTrueSlot()
 {
-    DbgCmdExecDirect(QString("SetWatchdog %1, \"istrue\"").arg(getSelectedId()).toUtf8().constData());
+    DbgCmdExecDirect(QString("SetWatchdog %1, \"istrue\"").arg(getSelectedId()));
     updateWatch();
 }
 
 void WatchView::watchdogIsFalseSlot()
 {
-    DbgCmdExecDirect(QString("SetWatchdog %1, \"isfalse\"").arg(getSelectedId()).toUtf8().constData());
+    DbgCmdExecDirect(QString("SetWatchdog %1, \"isfalse\"").arg(getSelectedId()));
+    updateWatch();
+}
+
+void WatchView::setTypeUintSlot()
+{
+    DbgCmdExecDirect(QString("SetWatchType %1, \"uint\"").arg(getSelectedId()));
+    updateWatch();
+}
+
+void WatchView::setTypeIntSlot()
+{
+    DbgCmdExecDirect(QString("SetWatchType %1, \"int\"").arg(getSelectedId()));
+    updateWatch();
+}
+
+void WatchView::setTypeFloatSlot()
+{
+    DbgCmdExecDirect(QString("SetWatchType %1, \"float\"").arg(getSelectedId()));
+    updateWatch();
+}
+
+void WatchView::setTypeAsciiSlot()
+{
+    DbgCmdExecDirect(QString("SetWatchType %1, \"ascii\"").arg(getSelectedId()));
+    updateWatch();
+}
+
+void WatchView::setTypeUnicodeSlot()
+{
+    DbgCmdExecDirect(QString("SetWatchType %1, \"unicode\"").arg(getSelectedId()));
     updateWatch();
 }

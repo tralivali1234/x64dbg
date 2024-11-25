@@ -1,5 +1,4 @@
-#ifndef CPUMULTIDUMP_H
-#define CPUMULTIDUMP_H
+#pragma once
 
 #include <QWidget>
 #include "TabWidget.h"
@@ -15,25 +14,29 @@ class CPUMultiDump : public MHTabWidget
 {
     Q_OBJECT
 public:
-    explicit CPUMultiDump(CPUDisassembly* disas, int nbCpuDumpTabs = 1, QWidget* parent = 0);
+    explicit CPUMultiDump(CPUDisassembly* disassembly, int nbCpuDumpTabs = 1, QWidget* parent = nullptr);
+    Architecture* getArchitecture() const;
     CPUDump* getCurrentCPUDump();
     void getTabNames(QList<QString> & names);
     int getMaxCPUTabs();
-    QMenu* mDumpPluginMenu;
+    QMenu* mDumpPluginMenu; // TODO: no
+    void saveWindowSettings();
+    void loadWindowSettings();
 
 signals:
     void displayReferencesWidget();
 
 public slots:
     void updateCurrentTabSlot(int tabIndex);
-    void printDumpAtSlot(dsint parVa);
-    void printDumpAtNSlot(duint parVa, int index);
+    void printDumpAtSlot(duint va);
+    void printDumpAtNSlot(duint va, int index);
     void selectionGetSlot(SELECTIONDATA* selectionData);
     void selectionSetSlot(const SELECTIONDATA* selectionData);
     void dbgStateChangedSlot(DBGSTATE dbgState);
     void openChangeTabTitleDialogSlot(int tabIndex);
     void displayReferencesWidgetSlot();
     void focusCurrentDumpSlot();
+    void showDisassemblyTabSlot(duint selectionStart, duint selectionEnd, duint firstAddress);
     void getDumpAttention();
 
 private:
@@ -44,11 +47,11 @@ private:
     WatchView* mWatch;
     LocalVarsView* mLocalVars;
     StructWidget* mStructWidget;
+    CPUDisassembly* mMainDisassembly = nullptr;
+    CPUDisassembly* mExtraDisassembly = nullptr;
 
     int GetDumpWindowIndex(int dump);
     int GetWatchWindowIndex();
     void SwitchToDumpWindow();
     void SwitchToWatchWindow();
 };
-
-#endif // CPUMULTIDUMP_H

@@ -8,6 +8,26 @@
 #include "value.h"
 #include "variable.h"
 
+bool cbShowThreadId(int argc, char* argv[])
+{
+    if(argc > 1)
+    {
+        duint threadId = 0;
+        if(!valfromstring(argv[1], &threadId, false))
+            return false;
+
+        SELECTIONDATA newSelection = { threadId, threadId };
+        if(!GuiSelectionSet(GUI_THREADS, &newSelection))
+        {
+            dprintf(QT_TRANSLATE_NOOP("DBG", "Invalid thread %s\n"), formatpidtid((DWORD)threadId).c_str());
+            return false;
+        }
+    }
+
+    GuiShowThreads();
+    return true;
+}
+
 bool cbDebugDisasm(int argc, char* argv[])
 {
     duint addr = 0;
@@ -47,7 +67,15 @@ bool cbDebugDump(int argc, char* argv[])
         GuiDumpAtN(addr, int(index));
     }
     else
-        GuiDumpAt(addr);
+    {
+        ACTIVEVIEW activeView;
+        GuiGetActiveView(&activeView);
+        int dumpIndex;
+        if(sscanf_s(activeView.title, "Dump %d", &dumpIndex) == 1)
+            GuiDumpAtN(addr, dumpIndex);
+        else
+            GuiDumpAt(addr);
+    }
     GuiShowCpu();
     GuiFocusView(GUI_DUMP);
     return true;
@@ -130,7 +158,8 @@ bool cbInstrGraph(int argc, char* argv[])
             return false;
     }
     GuiUpdateAllViews();
-    GuiFocusView(GUI_GRAPH);
+    if(!silent)
+        GuiFocusView(GUI_GRAPH);
     return true;
 }
 
@@ -191,7 +220,7 @@ bool cbInstrRefadd(int argc, char* argv[])
     int index = GuiReferenceGetRowCount();
     GuiReferenceSetRowCount(index + 1);
     char addr_text[32] = "";
-    sprintf_s(addr_text, "%p", addr);
+    sprintf_s(addr_text, "%p", (void*)addr);
     GuiReferenceSetCellContent(index, 0, addr_text);
     GuiReferenceSetCellContent(index, 1, stringformatinline(argv[2]).c_str());
     GuiReferenceReloadData();
@@ -295,5 +324,45 @@ bool cbDebugUpdateTitle(int argc, char* argv[])
         addr = GetContextDataEx(hActiveThread, UE_CIP);
     }
     DebugUpdateTitleAsync(addr, false);
+    return true;
+}
+
+bool cbShowReferences(int argc, char* argv[])
+{
+    GuiShowReferences();
+    return true;
+}
+
+bool cbSymbolsFollow(int argc, char* argv[])
+{
+    if(argc < 2)
+        return false;
+    duint addr;
+    if(!valfromstring(argv[1], &addr, false) || !MemIsValidReadPtr(addr, true))
+    {
+        dprintf(QT_TRANSLATE_NOOP("DBG", "Invalid address \"%s\"!\n"), argv[1]);
+        return false;
+    }
+
+    duint base = ModBaseFromAddr(addr);
+    if(!base)
+    {
+        dprintf(QT_TRANSLATE_NOOP("DBG", "Address \"%s\" doesn't belong to any module!\n"), argv[1]);
+        return false;
+    }
+
+    GuiSelectInSymbolsTab(base);
+    GuiFocusView(GUI_SYMMOD);
+    return true;
+}
+
+bool cbGotoTrace(int argc, char* argv[])
+{
+    duint index = 0;
+    if(IsArgumentsLessThan(argc, 2) || !valfromstring(argv[1], &index, false))
+        return false;
+
+    GuiGotoTrace(index);
+    GuiShowTrace();
     return true;
 }

@@ -1,9 +1,8 @@
-#ifndef ATTACHDIALOG_H
-#define ATTACHDIALOG_H
+#pragma once
 
 #include <QDialog>
 
-class StdSearchListView;
+class StdIconSearchListView;
 class QMenu;
 class QAction;
 
@@ -17,20 +16,27 @@ class AttachDialog : public QDialog
     Q_OBJECT
 
 public:
-    explicit AttachDialog(QWidget* parent = 0);
+    explicit AttachDialog(QWidget* parent = nullptr);
     ~AttachDialog();
 
 private slots:
     void on_btnAttach_clicked();
     void on_btnFindWindow_clicked();
     void refresh();
-    void processListContextMenu(QMenu* wMenu);
+    void processListContextMenu(QMenu* menu);
 
 private:
     Ui::AttachDialog* ui;
-    StdSearchListView* mSearchListView;
+    StdIconSearchListView* mSearchListView;
     QAction* mAttachAction;
     QAction* mRefreshAction;
-};
 
-#endif // ATTACHDIALOG_H
+    enum
+    {
+        ColPid,
+        ColName,
+        ColTitle,
+        ColPath,
+        ColCommandLine,
+    };
+};

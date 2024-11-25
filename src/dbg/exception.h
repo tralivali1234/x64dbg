@@ -19,5 +19,9 @@ bool ExceptionNameToCode(const char* Name, unsigned int* ErrorCode);
 bool ConstantCodeInit(const String & constantFile);
 bool ConstantFromName(const String & name, duint & value);
 std::vector<CONSTANTINFO> ConstantList();
+// To use this function, use EXCLUSIVE_ACQUIRE(LockModules)
+bool SyscallInit();
+const String & SyscallToName(unsigned int index);
+unsigned int SyscallToId(const String & name);
 
 #endif // _EXCEPTION_H

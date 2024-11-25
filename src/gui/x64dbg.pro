@@ -36,7 +36,7 @@ UI_DIR = $${X64_GEN_DIR}
 ##
 ## QT libraries
 ##
-QT += core gui network
+QT += core gui network winextras
 
 # QT5 requires widgets
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
@@ -49,7 +49,7 @@ QMAKE_CXXFLAGS_RELEASE += -Zi   # Compiler
 QMAKE_LFLAGS_RELEASE += /DEBUG  # Linker
 
 # Build as a library
-DEFINES += BUILD_LIB NOMINMAX
+DEFINES += BUILD_LIB NOMINMAX X64DBG
 TEMPLATE = lib
 
 ##
@@ -66,14 +66,29 @@ INCLUDEPATH += \
     Src/Global \
     Src/Utils \
     Src/ThirdPartyLibs/ldconvert \
-    ../zydis_wrapper \
-    ../zydis_wrapper/zydis/include
+    ../zydis_wrapper
 
 # Resources, sources, headers, and forms
 RESOURCES += \
     resource.qrc
 
 SOURCES += \
+    Src/BasicView/StdIconSearchListView.cpp \
+    Src/BasicView/StdIconTable.cpp \
+    Src/Disassembler/QZydis.cpp \
+    Src/Gui/CPURegistersView.cpp \
+    Src/Gui/RichTextItemDelegate.cpp \
+    Src/Gui/SystemBreakpointScriptDialog.cpp \
+    Src/Imports.cpp \
+    Src/Tracer/TraceDump.cpp \
+    Src/Tracer/TraceFileDump.cpp \
+    Src/Tracer/TraceInfoBox.cpp \
+    Src/Tracer/TraceManager.cpp \
+    Src/Tracer/TraceRegisters.cpp \
+    Src/Tracer/TraceStack.cpp \
+    Src/Tracer/TraceWidget.cpp \
+    Src/Tracer/TraceXrefBrowseDialog.cpp \
+    Src/Utils/CommonActions.cpp \
     Src/main.cpp \
     Src/Gui/MainWindow.cpp \
     Src/Gui/CPUWidget.cpp \
@@ -81,7 +96,6 @@ SOURCES += \
     Src/BasicView/Disassembly.cpp \
     Src/BasicView/HexDump.cpp \
     Src/BasicView/AbstractTableView.cpp \
-    Src/Disassembler/QBeaEngine.cpp \
     Src/Disassembler/ZydisTokenizer.cpp \
     Src/Memory/MemoryPage.cpp \
     Src/Bridge/Bridge.cpp \
@@ -173,7 +187,6 @@ SOURCES += \
     Src/Gui/LocalVarsView.cpp \
     Src/Gui/MessagesBreakpoints.cpp \
     Src/Gui/AboutDialog.cpp \
-    Src/Gui/BreakpointMenu.cpp \
     Src/Gui/ComboBoxDialog.cpp \
     Src/Utils/SymbolAutoCompleteModel.cpp \
     Src/Tracer/TraceBrowser.cpp \
@@ -183,10 +196,25 @@ SOURCES += \
     Src/BasicView/AbstractStdTable.cpp \
     Src/Gui/ZehSymbolTable.cpp \
     Src/BasicView/StdSearchListView.cpp \
-    Src/BasicView/StdTableSearchList.cpp
-
+    Src/BasicView/StdTableSearchList.cpp \
+    Src/Utils/BackgroundFlickerThread.cpp
 
 HEADERS += \
+    Src/BasicView/StdIconSearchListView.h \
+    Src/BasicView/StdIconTable.h \
+    Src/Disassembler/QZydis.h \
+    Src/Gui/CPURegistersView.h \
+    Src/Gui/RichTextItemDelegate.h \
+    Src/Gui/SystemBreakpointScriptDialog.h \
+    Src/Tracer/TraceDump.h \
+    Src/Tracer/TraceFileDump.h \
+    Src/Tracer/TraceInfoBox.h \
+    Src/Tracer/TraceManager.h \
+    Src/Tracer/TraceRegisters.h \
+    Src/Tracer/TraceStack.h \
+    Src/Tracer/TraceWidget.h \
+    Src/Tracer/TraceXrefBrowseDialog.h \
+    Src/Utils/CommonActions.h \
     Src/main.h \
     Src/Gui/MainWindow.h \
     Src/Gui/CPUWidget.h \
@@ -194,7 +222,6 @@ HEADERS += \
     Src/BasicView/Disassembly.h \
     Src/BasicView/HexDump.h \
     Src/BasicView/AbstractTableView.h \
-    Src/Disassembler/QBeaEngine.h \
     Src/Disassembler/ZydisTokenizer.h \
     Src/Memory/MemoryPage.h \
     Src/Bridge/Bridge.h \
@@ -290,7 +317,6 @@ HEADERS += \
     Src/Gui/LocalVarsView.h \
     Src/Gui/MessagesBreakpoints.h \
     Src/Gui/AboutDialog.h \
-    Src/Gui/BreakpointMenu.h \
     Src/Gui/ComboBoxDialog.h \
     Src/Utils/VaHistory.h \
     Src/Utils/SymbolAutoCompleteModel.h \
@@ -305,10 +331,11 @@ HEADERS += \
     Src/BasicView/StdSearchListView.h \
     Src/Gui/FileLines.h \
     Src/BasicView/StdTableSearchList.h \
-    Src/Utils/MethodInvoker.h
-    
+    Src/Utils/MethodInvoker.h \
+    Src/Utils/BackgroundFlickerThread.h
 
 FORMS += \
+    Src/Gui/SystemBreakpointScriptDialog.ui \
     Src/Gui/MainWindow.ui \
     Src/Gui/CPUWidget.ui \
     Src/Gui/GotoDialog.ui \
@@ -343,7 +370,8 @@ FORMS += \
     Src/Gui/SimpleTraceDialog.ui \
     Src/Gui/MessagesBreakpoints.ui \
     Src/Gui/AboutDialog.ui \
-    Src/Gui/ComboBoxDialog.ui
+    Src/Gui/ComboBoxDialog.ui \
+    Src/Tracer/TraceWidget.ui
 
 ##
 ## Libraries

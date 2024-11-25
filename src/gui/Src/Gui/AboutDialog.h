@@ -1,5 +1,4 @@
-#ifndef ABOUTDIALOG_H
-#define ABOUTDIALOG_H
+#pragma once
 
 #include <QDialog>
 
@@ -15,7 +14,7 @@ class AboutDialog : public QDialog
     Q_OBJECT
 
 public:
-    explicit AboutDialog(UpdateChecker* updateChecker, QWidget* parent = 0);
+    explicit AboutDialog(UpdateChecker* updateChecker, QWidget* parent = nullptr);
     ~AboutDialog();
 
 protected:
@@ -28,5 +27,3 @@ private:
     Ui::AboutDialog* ui;
     UpdateChecker* mUpdateChecker;
 };
-
-#endif // ABOUTDIALOG_H

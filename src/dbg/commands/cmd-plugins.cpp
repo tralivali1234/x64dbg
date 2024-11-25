@@ -25,7 +25,7 @@ static DWORD WINAPI scyllaThread(void* lpParam)
         FreeLibrary(hScylla);
         return 0;
     }
-    auto cip = GetContextDataEx(fdProcessInfo->hThread, UE_CIP);
+    auto cip = GetContextDataEx(hActiveThread, UE_CIP);
     auto cipModBase = ModBaseFromAddr(cip);
     ScyllaStartGui(fdProcessInfo->dwProcessId, (HINSTANCE)cipModBase, cip);
     FreeLibrary(hScylla);
@@ -69,7 +69,8 @@ bool cbInstrPluginReload(int argc, char* argv[])
     {
         auto text = StringUtils::Utf8ToUtf16(GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Press OK to reload the plugin...")));
         auto title = StringUtils::Utf8ToUtf16(GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Reload")));
-        MessageBoxW(GuiGetWindowHandle(), text.c_str(), title.c_str(), 0);
+        if(MessageBoxW(GuiGetWindowHandle(), text.c_str(), title.c_str(), MB_OKCANCEL) != IDOK)
+            return true;
     }
     return pluginload(argv[1]);
 }
