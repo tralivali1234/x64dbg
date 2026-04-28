@@ -36,6 +36,7 @@ public slots:
     void setBreakpointOnAllApiCalls();
     void removeBreakpointOnAllApiCalls();
     void toggleBookmark();
+    void copyReferenceAddress();
     void refreshShortcutsSlot();
     void referenceSetProgressSlot(int progress);
     void referenceSetCurrentTaskProgressSlot(int progress, QString taskTitle);
@@ -56,6 +57,7 @@ private:
     QAction* mFollowApiAddress;
     QAction* mToggleBreakpoint;
     QAction* mToggleBookmark;
+    QAction* mCopyReferenceAddress;
     QAction* mSetBreakpointOnAllCommands;
     QAction* mRemoveBreakpointOnAllCommands;
     QAction* mSetBreakpointOnAllApiCalls;
@@ -77,5 +79,5 @@ private:
     void setBreakpointAt(duint row, BPSetAction action);
     dsint apiAddressFromString(const QString & s);
 
-    void mouseReleaseEvent(QMouseEvent* event);
+    void mouseReleaseEvent(QMouseEvent* event) override;
 };

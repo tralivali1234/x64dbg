@@ -6,6 +6,14 @@
 #include <sstream>
 #include <iomanip>
 
+#ifndef _In_z_
+#define _In_z_
+#endif // _In_z_
+
+#ifndef _Printf_format_string_
+#define _Printf_format_string_
+#endif // _Printf_format_string_
+
 typedef std::string String;
 typedef std::wstring WString;
 typedef std::vector<String> StringList;
@@ -100,6 +108,9 @@ public:
 
 private:
     static const String WHITESPACE;
+
+    static bool convertLongLongNumber(const char* str, unsigned long long & result, int radix);
+    static bool convertNumber(const char* str, size_t & result, int radix);
 };
 
 #endif //_STRINGUTILS_H

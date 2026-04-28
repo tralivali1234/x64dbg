@@ -9,9 +9,9 @@
 #include <QMenu>
 #include "StringUtil.h"
 #include "Configuration.h"
-#include "MenuBuilder.h"
+#include <Utils/MenuBuilder.h>
 #include "MiscUtil.h"
-#include "ActionHelpers.h"
+#include <Utils/ActionHelpers.h>
 
 class CachedFontMetrics;
 class ColumnReorderDialog;
@@ -235,4 +235,13 @@ protected:
     void invalidateCachedFont();
 
     ColumnReorderDialog* mReorderDialog = nullptr;
+
+    friend class AccessibleAbstractTableView;
+    friend class AccessibleAbstractTableViewCell;
+    friend class AccessibleAbstractTableViewCellTitle;
+    void accessibilitySelectionChanged();
+    void accessibilityTableModelChanged();
+    int accessibilitySelectedColumn; // display index excluding hidden columns
+    virtual int accessibilitySelectedRow() const;
+    void accessibilityMousePressSetColumn(QMouseEvent* event);
 };

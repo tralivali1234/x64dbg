@@ -1,10 +1,8 @@
 #pragma once
 
-#ifdef _WIN64
-#define _WIN32_WINNT 0x0502 // XP x64 is version 5.2
-#else
-#define _WIN32_WINNT 0x0501
-#endif
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0601 // XP x64 is version 5.2, Vista is version 6.0, Windows 7 is version 6.1
+#endif // _WIN32_WINNT
 
 #ifdef WINVER // Overwrite WINVER if given on command line
 #undef WINVER
@@ -12,12 +10,10 @@
 #define WINVER _WIN32_WINNT
 
 #ifndef _WIN32_IE
-#define _WIN32_IE 0x0500
+#define _WIN32_IE _WIN32_IE_WIN7
 #endif //_WIN32_IE
 
-// Allow including Windows.h without bringing in a redefined and outdated subset of NTSTATUSes.
-// To get NTSTATUS defines, #undef WIN32_NO_STATUS after Windows.h and then #include <ntstatus.h>
-#define WIN32_NO_STATUS
+#include "ntdll/ntdll.h"
 
 #include "../dbg_types.h"
 #include "../dbg_assert.h"
@@ -35,6 +31,12 @@
 #endif //QT_TRANSLATE_NOOP
 // Uncomment the following line to allow memory leak tracing
 //#define ENABLE_MEM_TRACE
+
+#ifdef _MSC_VER
+#define DBG_ALIGNAS(x) __declspec(align(x))
+#else
+#define DBG_ALIGNAS(x) alignas(x)
+#endif // _MSC_VER
 
 //defines
 #define deflen 1024
@@ -62,7 +64,7 @@ bool DirExists(const char* dir);
 bool GetFileNameFromHandle(HANDLE hFile, char* szFileName, size_t nCount);
 bool GetFileNameFromProcessHandle(HANDLE hProcess, char* szFileName, size_t nCount);
 bool GetFileNameFromModuleHandle(HANDLE hProcess, HMODULE hModule, char* szFileName, size_t nCount);
-bool settingboolget(const char* section, const char* name);
+bool settingboolget(const char* section, const char* name, bool defaultValue);
 bool IsWow64();
 bool ResolveShortcut(HWND hwnd, const wchar_t* szShortcutPath, std::wstring & executable, std::wstring & arguments, std::wstring & workingDir);
 void WaitForThreadTermination(HANDLE hThread, DWORD timeout = INFINITE);
@@ -74,5 +76,15 @@ duint GetThreadCount();
 #else
 #define ArchValue(x32value, x64value) x32value
 #endif //_WIN64
+
+inline bool detectAVX512()
+{
+    int EABCDX[4];
+    __cpuid(EABCDX, 7); // detect AVX-512
+    if(EABCDX[1] & (1 << 16))  // EBX.bit16=1, supports AVX-512
+        return true;
+    else
+        return false;
+}
 
 #include "dynamicmem.h"

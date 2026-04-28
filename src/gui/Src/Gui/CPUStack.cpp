@@ -253,7 +253,7 @@ void CPUStack::setupContextMenu()
     mFreezeStack->setCheckable(true);
 
     //Follow in Memory Map
-    mCommonActions->build(mMenuBuilder, CommonActions::ActionMemoryMap | CommonActions::ActionDump | CommonActions::ActionDumpData);
+    mCommonActions->build(mMenuBuilder, CommonActions::ActionMemoryMap | CommonActions::ActionDisplayType | CommonActions::ActionDump | CommonActions::ActionDumpData);
 
     //Follow in Stack
     auto followStackName = ArchValue(tr("Follow DWORD in &Stack"), tr("Follow QWORD in &Stack"));
@@ -308,7 +308,7 @@ void CPUStack::updateFreezeStackAction()
     mFreezeStack->setChecked(bStackFrozen);
 }
 
-void CPUStack::getColumnRichText(duint col, duint rva, RichTextPainter::List & richText)
+void CPUStack::getColumnRichText(duint col, duint rva, RichTextPainter::List & richText) const
 {
     // Compute VA
     duint va = rvaToVa(rva);
@@ -864,9 +864,18 @@ void CPUStack::findPattern()
 {
     HexEditDialog hexEdit(this);
     hexEdit.isDataCopiable(false);
-    hexEdit.showStartFromSelection(true, ConfigBool("Gui", "CPUStackStartFromSelect"));
     hexEdit.mHexEdit->setOverwriteMode(false);
     hexEdit.setWindowTitle(tr("Find Pattern..."));
+
+    // Setup find mode for stack
+    duint stackBase = DbgMemFindBaseAddr(rvaToVa(getSelectionStart()), 0);
+    duint stackSize = 0;
+    DbgMemFindBaseAddr(rvaToVa(getSelectionStart()), &stackSize);
+    duint stackEnd = stackBase + stackSize;
+    duint selectionStart = rvaToVa(getSelectionStart());
+
+    hexEdit.setupFindMode(stackBase, stackEnd, selectionStart, ConfigBool("Gui", "CPUStackStartFromSelect"));
+
     if(hexEdit.exec() != QDialog::Accepted)
         return;
 
@@ -874,7 +883,7 @@ void CPUStack::findPattern()
     bool startFromSelection = hexEdit.startFromSelection();
     Config()->setBool("Gui", "CPUStackStartFromSelect", startFromSelection);
     if(!startFromSelection)
-        addr = DbgMemFindBaseAddr(addr, 0);
+        addr = stackBase;
 
     QString addrText = ToPtrString(addr);
     DbgCmdExec(QString("findall " + addrText + ", " + hexEdit.mHexEdit->pattern() + ", &data&"));
@@ -912,7 +921,7 @@ void CPUStack::realignSlot()
 #else //x86
     mCsp &= ~0x3;
 #endif //_WIN64
-    DbgValToString("csp", mCsp);
+    DbgValSetScalar("csp", mCsp);
     GuiUpdateAllViews();
 }
 

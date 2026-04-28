@@ -84,6 +84,12 @@ void ReferenceView::setupContextMenu()
     StdSearchListView::addAction(mToggleBookmark);
     connect(mToggleBookmark, SIGNAL(triggered()), this, SLOT(toggleBookmark()));
 
+    mCopyReferenceAddress = new QAction(DIcon("copy_item"), tr("Copy Address"), this);
+    mCopyReferenceAddress->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    addAction(mCopyReferenceAddress);
+    StdSearchListView::addAction(mCopyReferenceAddress);
+    connect(mCopyReferenceAddress, SIGNAL(triggered()), this, SLOT(copyReferenceAddress()));
+
     mSetBreakpointOnAllCommands = new QAction(DIcon("breakpoint_seton_all_commands"), tr("Set breakpoint on all commands"), this);
     connect(mSetBreakpointOnAllCommands, SIGNAL(triggered()), this, SLOT(setBreakpointOnAllCommands()));
 
@@ -107,8 +113,7 @@ void ReferenceView::connectBridge()
     connect(Bridge::getBridge(), SIGNAL(referenceSetProgress(int)), this, SLOT(referenceSetProgressSlot(int)));
     connect(Bridge::getBridge(), SIGNAL(referenceSetCurrentTaskProgress(int, QString)), this, SLOT(referenceSetCurrentTaskProgressSlot(int, QString)));
     connect(Bridge::getBridge(), SIGNAL(referenceAddCommand(QString, QString)), this, SLOT(addCommand(QString, QString)));
-    connect(stdSearchList(), SIGNAL(selectionChanged(duint)), this, SLOT(searchSelectionChanged(duint)));
-    connect(stdList(), SIGNAL(selectionChanged(duint)), this, SLOT(searchSelectionChanged(duint)));
+    connect(this, SIGNAL(selectionChanged(duint)), this, SLOT(searchSelectionChanged(duint)));
 }
 
 void ReferenceView::disconnectBridge()
@@ -118,8 +123,7 @@ void ReferenceView::disconnectBridge()
     disconnect(Bridge::getBridge(), SIGNAL(referenceSetProgress(int)), this, SLOT(referenceSetProgressSlot(int)));
     disconnect(Bridge::getBridge(), SIGNAL(referenceSetCurrentTaskProgress(int, QString)), this, SLOT(referenceSetCurrentTaskProgressSlot(int, QString)));
     disconnect(Bridge::getBridge(), SIGNAL(referenceAddCommand(QString, QString)), this, SLOT(addCommand(QString, QString)));
-    disconnect(stdSearchList(), SIGNAL(selectionChanged(duint)), this, SLOT(searchSelectionChanged(duint)));
-    disconnect(stdList(), SIGNAL(selectionChanged(duint)), this, SLOT(searchSelectionChanged(duint)));
+    disconnect(this, SIGNAL(selectionChanged(duint)), this, SLOT(searchSelectionChanged(duint)));
 }
 
 int ReferenceView::progress() const
@@ -136,6 +140,7 @@ void ReferenceView::refreshShortcutsSlot()
 {
     mToggleBreakpoint->setShortcut(ConfigShortcut("ActionToggleBreakpoint"));
     mToggleBookmark->setShortcut(ConfigShortcut("ActionToggleBookmark"));
+    mCopyReferenceAddress->setShortcut(ConfigShortcut("ActionCopyReferenceAddress"));
 }
 
 void ReferenceView::referenceSetProgressSlot(int progress)
@@ -155,8 +160,8 @@ void ReferenceView::referenceSetCurrentTaskProgressSlot(int progress, QString ta
 
 void ReferenceView::searchSelectionChanged(duint index)
 {
-    DbgValToString("$__disasm_refindex", index);
-    DbgValToString("$__dump_refindex", index);
+    DbgValSetScalar("$__disasm_refindex", index);
+    DbgValSetScalar("$__dump_refindex", index);
 }
 
 void ReferenceView::reloadDataSlot()
@@ -280,7 +285,7 @@ void ReferenceView::followGenericAddress()
     auto addr = DbgValFromString(mCurList->getCellContent(mCurList->getInitialSelection(), 0).toUtf8().constData());
     if(!addr)
         return;
-    if(DbgFunctions()->MemIsCodePage(addr, false))
+    if(DbgFunctions()->MemIsCodePage(addr, true))
         followAddress();
     else
     {
@@ -404,6 +409,17 @@ void ReferenceView::toggleBookmark()
         SimpleErrorBox(this, tr("Error!"), tr("DbgSetBookmarkAt failed!"));
     GuiUpdateAllViews();
 }
+
+void ReferenceView::copyReferenceAddress()
+{
+    if(!mCurList->getRowCount())
+        return;
+    QString address = mCurList->getCellContent(mCurList->getInitialSelection(), 0);
+    if(address.isEmpty())
+        return;
+    Bridge::CopyToClipboard(address);
+}
+
 
 dsint ReferenceView::apiAddressFromString(const QString & s)
 {

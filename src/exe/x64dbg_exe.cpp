@@ -8,6 +8,7 @@
 #include <windows.h>
 #include "crashdump.h"
 #include "../bridge/bridgemain.h"
+#include "../bridge/startupargs.h"
 #include "LoadResourceString.h"
 #include "signaturecheck.h"
 
@@ -30,9 +31,14 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     if(!InitializeSignatureCheck())
         MessageBoxA(nullptr, "Failed to initialize signature check.", "Error", MB_SYSTEMMODAL | MB_ICONERROR);
 
-    CrashDumpInitialize();
+    //CrashDumpInitialize();
 
-    const wchar_t* errormsg = BridgeInit();
+    const auto startupOptions = ParseHostStartupOptions();
+
+    BRIDGE_CONFIG config = {};
+    if(!startupOptions.userDirectory.empty())
+        config.szUserDirectory = startupOptions.userDirectory.c_str();
+    const wchar_t* errormsg = BridgeInit(&config);
     if(errormsg)
     {
         MessageBoxW(0, errormsg, LoadResString(IDS_BRIDGEINITERR), MB_ICONERROR | MB_SYSTEMMODAL);

@@ -10,6 +10,13 @@
 #include <tlhelp32.h>
 #include <psapi.h>
 
+enum LibraryBreakpointType
+{
+    UE_ON_LIB_LOAD = 1,
+    UE_ON_LIB_UNLOAD = 2,
+    UE_ON_LIB_ALL = 3,
+};
+
 //enums
 enum class ExceptionBreakOn
 {
@@ -31,8 +38,10 @@ struct INIT_STRUCT
     std::string exe;
     std::string commandline;
     std::string currentfolder;
+    uint32_t entryPointRva = 0;
     DWORD pid = 0;
     bool attach = false;
+    bool isDll = false;
 };
 
 struct ExceptionRange
@@ -65,6 +74,7 @@ void dbgstop();
 duint dbgdebuggedbase();
 duint dbggettimewastedcounter();
 bool dbgisrunning();
+bool dbgisdebugging();
 bool dbgisdll();
 void dbgsetattachevent(HANDLE handle);
 void dbgsetresumetid(duint tid);
@@ -99,6 +109,8 @@ void dbgforcebreaktrace();
 bool dbgstepactive();
 void dbgforcebreakstep();
 bool dbgsettracelogfile(const char* fileName);
+void dbgsettracepartyfilter(int party);
+int dbggettracepartyfilter();
 void dbgsetdebuggeeinitscript(const char* fileName);
 const char* dbggetdebuggeeinitscript();
 void dbgsetforeground();
@@ -135,6 +147,8 @@ void StepIntoWow64(TITANCBSTEP callback);
 void StepOverWrapper(TITANCBSTEP callback);
 void StepIntoUser(TITANCBSTEP callback);
 void StepIntoSystem(TITANCBSTEP callback);
+void StepOverUser(TITANCBSTEP callback);
+void StepOverSystem(TITANCBSTEP callback);
 bool dbgisdepenabled();
 BOOL CALLBACK chkWindowPidCallback(HWND hWnd, LPARAM lParam);
 BOOL ismainwindow(HWND handle);
@@ -163,5 +177,6 @@ extern HANDLE mProcHandle;
 extern HANDLE mForegroundHandle;
 extern duint gRtrPreviousCSP;
 extern HANDLE hDebugLoopThread;
+extern std::atomic_bool bIsDebugging;
 
 #endif // _DEBUGGER_H

@@ -19,6 +19,7 @@ void randombytes(uint8_t* buf, uint64_t len)
     __debugbreak();
 }
 
+// Always ends with a backslash
 static wchar_t szApplicationDir[MAX_PATH];
 static bool bPerformSignatureChecks = false;
 static bool bNewerThanXP = false;
@@ -36,8 +37,6 @@ static void debugMessage(const wchar_t* szMessage)
     OutputDebugStringW(finalMessage);
 }
 #endif // DEBUG_SIGNATURE_CHECKS
-
-#pragma comment(lib, "wintrust")
 
 #pragma pack(push, 1)
 struct EmbeddedSignature
@@ -57,18 +56,32 @@ static bool VerifyEmbeddedSignature(LPCWSTR pwszSourceFile, bool checkRevocation
         return false;
     }
 
-    auto fileSize = GetFileSize(hFile, nullptr);
-    SetFilePointer(hFile, fileSize - sizeof(EmbeddedSignature), nullptr, FILE_BEGIN);
+    LARGE_INTEGER fileSizeLI;
+    if(!GetFileSizeEx(hFile, &fileSizeLI) || fileSizeLI.QuadPart < (LONGLONG)sizeof(EmbeddedSignature))
+    {
+        CloseHandle(hFile);
+        return false;
+    }
+    LONGLONG fileSize = fileSizeLI.QuadPart;
+    LARGE_INTEGER seekPos;
+    seekPos.QuadPart = fileSize - sizeof(EmbeddedSignature);
+    SetFilePointerEx(hFile, seekPos, nullptr, FILE_BEGIN);
     EmbeddedSignature signature = {};
     DWORD read = 0;
     ReadFile(hFile, &signature, sizeof(signature), &read, nullptr);
-    SetFilePointer(hFile, 0, nullptr, FILE_BEGIN);
+    seekPos.QuadPart = 0;
+    SetFilePointerEx(hFile, seekPos, nullptr, FILE_BEGIN);
     if(signature.magic == 0xDEAD13371337BEEF)
     {
         // Read the file in memory
         fileSize -= sizeof(EmbeddedSignature);
-        std::vector<uint8_t> fileData(fileSize);
-        auto success = ReadFile(hFile, fileData.data(), fileSize, &read, nullptr);
+        if(fileSize > MAXDWORD)
+        {
+            CloseHandle(hFile);
+            return false;
+        }
+        std::vector<uint8_t> fileData((size_t)fileSize);
+        auto success = ReadFile(hFile, fileData.data(), (DWORD)fileSize, &read, nullptr);
         CloseHandle(hFile);
         if(!success)
         {
@@ -77,7 +90,7 @@ static bool VerifyEmbeddedSignature(LPCWSTR pwszSourceFile, bool checkRevocation
 
         // Hash the file contents
         uint8_t expected[64] = {};
-        crypto_hash(expected, fileData.data(), fileSize);
+        crypto_hash(expected, fileData.data(), (size_t)fileSize);
 
         // Verify the signature block
         u8 pk[32] =
@@ -215,10 +228,18 @@ static bool FileExists(const wchar_t* szFullPath)
     return (attrib != INVALID_FILE_ATTRIBUTES && !(attrib & FILE_ATTRIBUTE_DIRECTORY));
 }
 
-HMODULE WINAPI LoadLibraryCheckedW(const wchar_t* szDll, bool allowFailure)
+extern "C" HMODULE LoadLibraryCheckedW(const wchar_t* szDll, bool allowFailure)
 {
-    std::wstring fullDllPath = szApplicationDir;
-    fullDllPath += szDll;
+    std::wstring fullDllPath;
+    if(wcschr(szDll, L'\\') == nullptr)
+    {
+        fullDllPath = szApplicationDir;
+        fullDllPath += szDll;
+    }
+    else
+    {
+        fullDllPath = szDll;
+    }
 
 #ifdef DEBUG_SIGNATURE_CHECKS
     debugMessage(L"LoadLibraryCheckedW");
@@ -263,7 +284,7 @@ HMODULE WINAPI LoadLibraryCheckedW(const wchar_t* szDll, bool allowFailure)
     return hModule;
 }
 
-HMODULE WINAPI LoadLibraryCheckedA(const char* szDll, bool allowFailure)
+extern "C" HMODULE LoadLibraryCheckedA(const char* szDll, bool allowFailure)
 {
     return LoadLibraryCheckedW(Utf8ToUtf16(szDll).c_str(), allowFailure);
 }
@@ -385,10 +406,21 @@ static VOID CALLBACK MyLdrDllNotification(
 }
 #endif // DEBUG_SIGNATURE_CHECKS
 
+#ifndef LOAD_LIBRARY_SEARCH_APPLICATION_DIR
 #define LOAD_LIBRARY_SEARCH_APPLICATION_DIR 0x00000200
+#endif // LOAD_LIBRARY_SEARCH_APPLICATION_DIR
+
+#ifndef LOAD_LIBRARY_SEARCH_USER_DIRS
 #define LOAD_LIBRARY_SEARCH_USER_DIRS       0x00000400
+#endif // LOAD_LIBRARY_SEARCH_USER_DIRS
+
+#ifndef LOAD_LIBRARY_SEARCH_SYSTEM32
 #define LOAD_LIBRARY_SEARCH_SYSTEM32        0x00000800
+#endif // LOAD_LIBRARY_SEARCH_SYSTEM32
+
+#ifndef LOAD_LIBRARY_SEARCH_DEFAULT_DIRS
 #define LOAD_LIBRARY_SEARCH_DEFAULT_DIRS    0x00001000
+#endif // LOAD_LIBRARY_SEARCH_DEFAULT_DIRS
 
 typedef BOOL(WINAPI* pfnSetDefaultDllDirectories)(DWORD DirectoryFlags);
 typedef BOOL(WINAPI* pfnSetDllDirectoryW)(LPCWSTR lpPathName);
@@ -478,22 +510,34 @@ bool InitializeSignatureCheck()
         return false;
 #endif // DEBUG_SIGNATURE_CHECKS
 
-    if(bPerformSignatureChecks)
+#ifndef _DEBUG
+    // Safely load the MSVC runtime DLLs (since they cannot be delay loaded)
+    auto loadRuntimeDll = [&szSystemDir](const wchar_t* szDll) -> HMODULE
     {
-        // Safely load the MSVC runtime DLLs (since they cannot be delay loaded)
-        auto loadRuntimeDll = [](const wchar_t* szDll)
+        std::wstring fullDllPath = szApplicationDir;
+        fullDllPath += L'\\';
+        fullDllPath += szDll;
+        if(FileExists(fullDllPath.c_str()))
         {
-            std::wstring fullDllPath = szApplicationDir;
-            fullDllPath += L'\\';
-            fullDllPath += szDll;
-            if(FileExists(fullDllPath.c_str()))
-                LoadLibraryCheckedW(szDll, true);
+            if(bPerformSignatureChecks)
+            {
+                return LoadLibraryCheckedW(fullDllPath.c_str(), true);
+            }
             else
-                LoadLibraryW(szDll);
-        };
-        loadRuntimeDll(L"msvcr120.dll");
-        loadRuntimeDll(L"msvcp120.dll");
+            {
+                return LoadLibraryW(fullDllPath.c_str());
+            }
+        }
+        return nullptr;
+    };
+    loadRuntimeDll(L"vcruntime140.dll");
+    loadRuntimeDll(L"vcruntime140_1.dll");
+    if(!loadRuntimeDll(L"msvcp140.dll"))
+    {
+        MessageBoxW(nullptr, L"Failed to load msvcp140.dll!", L"Error", MB_ICONERROR | MB_SYSTEMMODAL);
+        ExitProcess(ERROR_MOD_NOT_FOUND);
     }
+#endif // _DEBUG
 
     return true;
 }

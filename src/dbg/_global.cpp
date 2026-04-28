@@ -272,10 +272,17 @@ bool GetFileNameFromModuleHandle(HANDLE hProcess, HMODULE hModule, char* szFileN
     auto result = false;
     if(GetMappedFileNameW(hProcess, hModule, wszDosFileName, _countof(wszDosFileName)))
     {
-        if(!DevicePathToPathW(wszDosFileName, wszFileName, _countof(wszFileName)))
+        if(DevicePathToPathW(wszDosFileName, wszFileName, _countof(wszFileName)))
+        {
+            // Verify the file exists - GetMappedFileNameW can return stale paths due to kernel section caching
+            // https://github.com/x64dbg/x64dbg/issues/3756
+            if(GetFileAttributesW(wszFileName) != INVALID_FILE_ATTRIBUTES)
+                result = true;
+        }
+
+        // Fall back to GetModuleFileNameExW if the path conversion failed or the file doesn't exist
+        if(!result)
             result = !!GetModuleFileNameExW(hProcess, hModule, wszFileName, _countof(wszFileName));
-        else
-            result = true;
     }
     else
         result = !!GetModuleFileNameExW(hProcess, hModule, wszFileName, _countof(wszFileName));
@@ -288,16 +295,18 @@ bool GetFileNameFromModuleHandle(HANDLE hProcess, HMODULE hModule, char* szFileN
 \brief Get a boolean setting from the configuration file.
 \param section The section of the setting (UTF-8).
 \param name The name of the setting (UTF-8).
-\return true if the setting was set and equals to true, otherwise returns false.
+\param defaultValue The default value if the setting is not set.
+\return The value of the setting.
 */
-bool settingboolget(const char* section, const char* name)
+bool settingboolget(const char* section, const char* name, bool defaultValue)
 {
     duint setting;
     if(!BridgeSettingGetUint(section, name, &setting))
-        return false;
-    if(setting)
-        return true;
-    return false;
+    {
+        BridgeSettingSetUint(section, name, defaultValue ? 1 : 0);
+        return defaultValue;
+    }
+    return setting != 0;
 }
 
 /**
@@ -401,27 +410,14 @@ void WaitForMultipleThreadsTermination(const HANDLE* hThread, int count, DWORD t
 duint GetThreadCount()
 {
     duint threadCount = std::thread::hardware_concurrency();
-
-    typedef BOOL(WINAPI * GetLogicalProcessorInformationEx_t)(
-        LOGICAL_PROCESSOR_RELATIONSHIP,
-        PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
-        PDWORD
-    );
-
-    static auto p_GetLogicalProcessorInformationEx = (GetLogicalProcessorInformationEx_t)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "GetLogicalProcessorInformationEx");
-    if(p_GetLogicalProcessorInformationEx == nullptr)
-    {
-        return threadCount;
-    }
-
     DWORD length = 0;
-    if(p_GetLogicalProcessorInformationEx(RelationAll, nullptr, &length) || GetLastError() != ERROR_INSUFFICIENT_BUFFER)
+    if(GetLogicalProcessorInformationEx(RelationAll, nullptr, &length) || GetLastError() != ERROR_INSUFFICIENT_BUFFER)
     {
         return threadCount;
     }
 
     std::vector<uint8_t> buffer(length);
-    if(!p_GetLogicalProcessorInformationEx(RelationAll, (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)buffer.data(), &length))
+    if(!GetLogicalProcessorInformationEx(RelationAll, (PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX)buffer.data(), &length))
     {
         return threadCount;
     }

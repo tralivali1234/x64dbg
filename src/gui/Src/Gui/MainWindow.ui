@@ -16,6 +16,9 @@
   <property name="windowTitle">
    <string>x64dbg</string>
   </property>
+  <property name="toolButtonStyle">
+   <enum>Qt::ToolButtonIconOnly</enum>
+  </property>
   <widget class="QWidget" name="centralWidget"/>
   <widget class="QMenuBar" name="menuBar">
    <property name="geometry">
@@ -160,6 +163,7 @@
     <addaction name="actionManual"/>
     <addaction name="actionFaq"/>
     <addaction name="actionAbout"/>
+    <addaction name="actionReleaseNotes"/>
     <addaction name="actionAbout_Qt"/>
     <addaction name="separator"/>
     <addaction name="actionCrashDump"/>
@@ -300,7 +304,7 @@
     <bool>false</bool>
    </property>
    <property name="allowedAreas">
-    <set>Qt::BottomToolBarArea</set>
+    <set>Qt::NoToolBarArea</set>
    </property>
    <attribute name="toolBarArea">
     <enum>BottomToolBarArea</enum>
@@ -1032,7 +1036,7 @@
      <normaloff>:/Default/icons/bit.png</normaloff>:/Default/icons/bit.png</iconset>
    </property>
    <property name="text">
-    <string>Bit</string>
+    <string>Mark covered (yes/no)</string>
    </property>
    <property name="statusTip">
     <string>Enable trace coverage with 1 bit (whether an instruction was executed or not)</string>
@@ -1044,10 +1048,10 @@
      <normaloff>:/Default/icons/byte.png</normaloff>:/Default/icons/byte.png</iconset>
    </property>
    <property name="text">
-    <string>Byte</string>
+    <string>Count hits (up to 63)</string>
    </property>
    <property name="statusTip">
-    <string>Enable trace coverage with 1 byte to record how many times an instruction has been executed.</string>
+    <string>Enable trace coverage with 1 byte per byte of code to record how many times an instruction has been executed, enable hit count up to 63 and accurate run trace assisted disassembly.</string>
    </property>
   </action>
   <action name="actionTRWord">
@@ -1056,10 +1060,15 @@
      <normaloff>:/Default/icons/word.png</normaloff>:/Default/icons/word.png</iconset>
    </property>
    <property name="text">
-    <string>Word</string>
+    <string>Count hits (up to 16383)</string>
    </property>
    <property name="statusTip">
-    <string>Enable trace coverage with 1 word to record how many times an instruction has been executed.</string>
+    <string>Enable trace coverage with 2 bytes per byte of code to record how many times an instruction has been executed, enable hit count up to 16383 and accurate run trace assisted disassembly.</string>
+   </property>
+  </action>
+  <action name="actionTRReset">
+   <property name="text">
+    <string>Reset trace coverage</string>
    </property>
   </action>
   <action name="actionTRTIBT">
@@ -1547,6 +1556,15 @@
    </property>
    <property name="statusTip">
     <string>Output the detailed help information about an assembly mnemonic to the log. Equivalent command &quot;mnemonichelp name&quot;.</string>
+   </property>
+  </action>
+  <action name="actionReleaseNotes">
+   <property name="icon">
+    <iconset theme="bug" resource="../../resource.qrc">
+     <normaloff>:/Default/icons/bug.png</normaloff>:/Default/icons/bug.png</iconset>
+   </property>
+   <property name="text">
+    <string>Release Notes</string>
    </property>
   </action>
  </widget>

@@ -81,7 +81,7 @@ void CPUDump::setupContextMenu()
         return DbgFunctions()->PatchInRange(rvaToVa(getSelectionStart()), rvaToVa(getSelectionEnd()));
     });
 
-    mCommonActions->build(mMenuBuilder, CommonActions::ActionDisasm | CommonActions::ActionMemoryMap | CommonActions::ActionDumpData | CommonActions::ActionDumpN
+    mCommonActions->build(mMenuBuilder, CommonActions::ActionDisasm | CommonActions::ActionMemoryMap | CommonActions::ActionDisplayType | CommonActions::ActionDumpData | CommonActions::ActionDumpN
                           | CommonActions::ActionDisasmData | CommonActions::ActionStackDump | CommonActions::ActionLabel | CommonActions::ActionWatch);
 
     mMenuBuilder->addAction(makeShortcutAction(DIcon("modify"), tr("&Modify Value"), SLOT(modifyValueSlot()), "ActionModifyValue"), [this](QMenu*)
@@ -230,6 +230,7 @@ void CPUDump::setupContextMenu()
     integerMenu->addAction(makeAction(DIcon("word"), tr("Unsigned short (16-bit)"), SLOT(integerUnsignedShortSlot())));
     integerMenu->addAction(makeAction(DIcon("dword"), tr("Unsigned long (32-bit)"), SLOT(integerUnsignedLongSlot())));
     integerMenu->addAction(makeAction(DIcon("qword"), tr("Unsigned long long (64-bit)"), SLOT(integerUnsignedLongLongSlot())));
+    integerMenu->addAction(makeAction(DIcon("byte"), tr("Hex byte (8-bit)"), SLOT(integerHexByteSlot())));
     integerMenu->addAction(makeAction(DIcon("word"), tr("Hex short (16-bit)"), SLOT(integerHexShortSlot())));
     integerMenu->addAction(makeAction(DIcon("dword"), tr("Hex long (32-bit)"), SLOT(integerHexLongSlot())));
     integerMenu->addAction(makeAction(DIcon("qword"), tr("Hex long long (64-bit)"), SLOT(integerHexLongLongSlot())));
@@ -239,18 +240,26 @@ void CPUDump::setupContextMenu()
     floatMenu->addAction(makeAction(DIcon("32bit-float"), tr("&Float (32-bit)"), SLOT(floatFloatSlot())));
     floatMenu->addAction(makeAction(DIcon("64bit-float"), tr("&Double (64-bit)"), SLOT(floatDoubleSlot())));
     floatMenu->addAction(makeAction(DIcon("80bit-float"), tr("&Long double (80-bit)"), SLOT(floatLongDoubleSlot())));
+    floatMenu->addAction(makeAction(DIcon("word"), tr("&Half float (16-bit)"), SLOT(floatHalfSlot())));
     mMenuBuilder->addMenu(makeMenu(DIcon("float"), tr("&Float")), floatMenu);
 
     mMenuBuilder->addAction(makeAction(DIcon("address"), tr("&Address"), SLOT(addressAsciiSlot())));
     mMenuBuilder->addAction(makeAction(DIcon("processor-cpu"), tr("&Disassembly"), SLOT(disassemblySlot())));
 
     mMenuBuilder->addSeparator();
+
     mMenuBuilder->addBuilder(new MenuBuilder(this, [this](QMenu * menu)
     {
         DbgMenuPrepare(GUI_DUMP_MENU);
         menu->addActions(mPluginMenu->actions());
         return true;
     }));
+
+    makeShortcutAction(DIcon("hex"), tr("Cycle Hex View"), SLOT(cycleHexViewSlot()), "ActionDumpViewHex");
+    makeShortcutAction(DIcon("strings"), tr("Cycle Text View"), SLOT(cycleTextViewSlot()), "ActionDumpViewText");
+    makeShortcutAction(DIcon("integer"), tr("Cycle Integer View"), SLOT(cycleIntegerViewSlot()), "ActionDumpViewInteger");
+    makeShortcutAction(DIcon("float"), tr("Cycle Float View"), SLOT(cycleFloatViewSlot()), "ActionDumpViewFloat");
+    makeShortcutAction(DIcon("address"), tr("Cycle Address View"), SLOT(cycleAddressViewSlot()), "ActionDumpViewAddress");
 
     mMenuBuilder->loadFromConfig();
     updateShortcuts();
@@ -263,7 +272,7 @@ void CPUDump::getAttention()
     thread->start();
 }
 
-void CPUDump::getColumnRichText(duint col, duint rva, RichTextPainter::List & richText)
+void CPUDump::getColumnRichText(duint col, duint rva, RichTextPainter::List & richText) const
 {
     if(col && !mDescriptor.at(col - 1).isData && mDescriptor.at(col - 1).itemCount) //print comments
     {
@@ -416,7 +425,7 @@ static QString getTooltipForVa(duint va, int depth)
         else
         {
             bool isCodePage;
-            isCodePage = DbgFunctions()->MemIsCodePage(va, false);
+            isCodePage = DbgFunctions()->MemIsCodePage(va, true);
             char disassembly[GUI_MAX_DISASSEMBLY_SIZE];
             if(isCodePage)
             {
@@ -612,7 +621,7 @@ void CPUDump::gotoPreviousReferenceSlot()
     if(count)
     {
         if(index > 0 && addr == rvaToVa(getInitialSelection()))
-            DbgValToString("$__dump_refindex", index - 1);
+            DbgValSetScalar("$__dump_refindex", index - 1);
         DbgCmdExec("dump refsearch.addr($__dump_refindex)");
         GuiReferenceSetSingleSelection(int(DbgEval("$__dump_refindex")), false);
     }
@@ -624,7 +633,7 @@ void CPUDump::gotoNextReferenceSlot()
     if(count)
     {
         if(index + 1 < count && addr == rvaToVa(getInitialSelection()))
-            DbgValToString("$__dump_refindex", index + 1);
+            DbgValSetScalar("$__dump_refindex", index + 1);
         DbgCmdExec("dump refsearch.addr($__dump_refindex)");
         GuiReferenceSetSingleSelection(int(DbgEval("$__dump_refindex")), false);
     }
@@ -703,6 +712,7 @@ void CPUDump::hexCodepageSlot()
     CodepageSelectionDialog dialog(this);
     if(dialog.exec() != QDialog::Accepted)
         return;
+    Config()->setUint("HexDump", "DefaultView", (duint)ViewHexCodepage);
     auto codepage = dialog.getSelectedCodepage();
 
     int charwidth = getCharWidth();
@@ -841,6 +851,7 @@ void CPUDump::textCodepageSlot()
     CodepageSelectionDialog dialog(this);
     if(dialog.exec() != QDialog::Accepted)
         return;
+    Config()->setUint("HexDump", "DefaultView", (duint)ViewTextCodepage);
     auto codepage = dialog.getSelectedCodepage();
 
     ColumnDescriptor colDesc;
@@ -1058,6 +1069,31 @@ void CPUDump::integerUnsignedLongLongSlot()
     reloadData();
 }
 
+void CPUDump::integerHexByteSlot()
+{
+    Config()->setUint("HexDump", "DefaultView", (duint)ViewIntegerHexByte);
+    int charwidth = getCharWidth();
+    ColumnDescriptor colDesc;
+    DataDescriptor dDesc;
+
+    colDesc.isData = true; //hex char
+    colDesc.itemCount = 16;
+    colDesc.separator = 0;
+    colDesc.data.itemSize = Byte;
+    colDesc.data.wordMode = HexWord;
+    appendResetDescriptor(8 + charwidth * 47, tr("Hex"), false, colDesc);
+
+    colDesc.isData = false; //empty column
+    colDesc.itemCount = 0;
+    colDesc.separator = 0;
+    dDesc.itemSize = Byte;
+    dDesc.byteMode = AsciiByte;
+    colDesc.data = dDesc;
+    appendDescriptor(0, "", false, colDesc);
+
+    reloadData();
+}
+
 void CPUDump::integerHexShortSlot()
 {
     Config()->setUint("HexDump", "DefaultView", (duint)ViewIntegerHexShort);
@@ -1208,6 +1244,31 @@ void CPUDump::floatLongDoubleSlot()
     reloadData();
 }
 
+void CPUDump::floatHalfSlot()
+{
+    Config()->setUint("HexDump", "DefaultView", (duint)ViewFloatHalf);
+    int charwidth = getCharWidth();
+    ColumnDescriptor colDesc;
+    DataDescriptor dDesc;
+
+    colDesc.isData = true; //float half
+    colDesc.itemCount = 4;
+    colDesc.separator = 0;
+    colDesc.data.itemSize = Word;
+    colDesc.data.wordMode = HalfFloatWord;
+    appendResetDescriptor(8 + charwidth * 40, tr("Half float (16-bit)"), false, colDesc);
+
+    colDesc.isData = false; //empty column
+    colDesc.itemCount = 0;
+    colDesc.separator = 0;
+    dDesc.itemSize = Byte;
+    dDesc.byteMode = AsciiByte;
+    colDesc.data = dDesc;
+    appendDescriptor(0, "", false, colDesc);
+
+    reloadData();
+}
+
 void CPUDump::addressAsciiSlot()
 {
     Config()->setUint("HexDump", "DefaultView", (duint)ViewAddressAscii);
@@ -1221,11 +1282,13 @@ void CPUDump::addressAsciiSlot()
 #ifdef _WIN64
     colDesc.data.itemSize = Qword;
     colDesc.data.qwordMode = HexQword;
+    auto title = tr("Address (QWORD)");
 #else
     colDesc.data.itemSize = Dword;
     colDesc.data.dwordMode = HexDword;
+    auto title = tr("Address (DWORD)");
 #endif
-    appendResetDescriptor(8 + charwidth * 2 * sizeof(duint), tr("Value"), false, colDesc);
+    appendResetDescriptor(8 + charwidth * 2 * sizeof(duint), title, false, colDesc);
 
     colDesc.isData = true;
     colDesc.separator = 0;
@@ -1266,11 +1329,13 @@ void CPUDump::addressUnicodeSlot()
 #ifdef _WIN64
     colDesc.data.itemSize = Qword;
     colDesc.data.qwordMode = HexQword;
+    auto title = tr("Address (QWORD)");
 #else
     colDesc.data.itemSize = Dword;
     colDesc.data.dwordMode = HexDword;
+    auto title = tr("Address (DWORD)");
 #endif
-    appendResetDescriptor(8 + charwidth * 2 * sizeof(duint), tr("Value"), false, colDesc);
+    appendResetDescriptor(8 + charwidth * 2 * sizeof(duint), title, false, colDesc);
 
     colDesc.isData = true;
     colDesc.separator = 0;
@@ -1449,16 +1514,23 @@ void CPUDump::findPattern()
 {
     HexEditDialog hexEdit(this);
     hexEdit.isDataCopiable(false);
-    hexEdit.showStartFromSelection(true, ConfigBool("Gui", "CPUDumpStartFromSelect"));
+
+    // Setup find mode with memory region range
+    duint selectionStart = rvaToVa(getSelectionStart());
+    duint regionStart = DbgMemFindBaseAddr(selectionStart, 0);
+    duint regionSize = 0;
+    DbgMemFindBaseAddr(selectionStart, &regionSize);
+    duint regionEnd = regionStart + regionSize;
+
+    hexEdit.setupFindMode(regionStart, regionEnd, selectionStart, ConfigBool("Gui", "CPUDumpStartFromSelect"));
     hexEdit.mHexEdit->setOverwriteMode(false);
     hexEdit.setWindowTitle(tr("Find Pattern..."));
     if(hexEdit.exec() != QDialog::Accepted)
         return;
+
     bool startFromSelection = hexEdit.startFromSelection();
     Config()->setBool("Gui", "CPUDumpStartFromSelect", startFromSelection);
-    dsint addr = rvaToVa(getSelectionStart());
-    if(!startFromSelection)
-        addr = DbgMemFindBaseAddr(addr, 0);
+    dsint addr = startFromSelection ? selectionStart : regionStart;
     QString addrText = ToPtrString(addr);
     DbgCmdExec(QString("findall " + addrText + ", " + hexEdit.mHexEdit->pattern() + ", &data&"));
     emit displayReferencesWidget();
@@ -1542,6 +1614,103 @@ void CPUDump::allocMemorySlot()
     }
 }
 
+CPUDump::ViewEnum_t CPUDump::getCurrentView() const
+{
+    return (ViewEnum_t)ConfigUint("HexDump", "DefaultView");
+}
+
+void CPUDump::cycleHexViewSlot()
+{
+    ViewEnum_t current = getCurrentView();
+
+    if(current == ViewHexAscii)
+        setView(ViewHexUnicode);
+    else if(current == ViewHexUnicode)
+        hexCodepageSlot();
+    else
+        setView(ViewHexAscii);
+}
+
+void CPUDump::cycleTextViewSlot()
+{
+    ViewEnum_t current = getCurrentView();
+
+    if(current == ViewTextAscii)
+        setView(ViewTextUnicode);
+    else if(current == ViewTextUnicode)
+        textCodepageSlot();
+    else
+        setView(ViewTextAscii);
+}
+
+void CPUDump::cycleIntegerViewSlot()
+{
+    ViewEnum_t current = getCurrentView();
+    static const ViewEnum_t intViews[] =
+    {
+        ViewIntegerHexByte,
+        ViewIntegerHexShort,
+        ViewIntegerHexLong,
+        ViewIntegerHexLongLong,
+        ViewIntegerSignedByte,
+        ViewIntegerSignedShort,
+        ViewIntegerSignedLong,
+        ViewIntegerSignedLongLong,
+        ViewIntegerUnsignedByte,
+        ViewIntegerUnsignedShort,
+        ViewIntegerUnsignedLong,
+        ViewIntegerUnsignedLongLong,
+    };
+
+    const size_t intViewsCount = sizeof(intViews) / sizeof(intViews[0]);
+    ViewEnum_t next = intViews[0];
+    for(size_t i = 0; i < intViewsCount; i++)
+    {
+        if(intViews[i] == current)
+        {
+            next = intViews[(i + 1) % intViewsCount];
+            break;
+        }
+    }
+
+    setView(next);
+}
+
+void CPUDump::cycleFloatViewSlot()
+{
+    ViewEnum_t current = getCurrentView();
+    static const ViewEnum_t floatViews[] =
+    {
+        ViewFloatHalf,
+        ViewFloatFloat,
+        ViewFloatDouble,
+        ViewFloatLongDouble,
+    };
+
+    const size_t floatViewsCount = sizeof(floatViews) / sizeof(floatViews[0]);
+    ViewEnum_t next = floatViews[0];
+    for(size_t i = 0; i < floatViewsCount; i++)
+    {
+        if(floatViews[i] == current)
+        {
+            next = floatViews[(i + 1) % floatViewsCount];
+            break;
+        }
+    }
+
+    setView(next);
+}
+
+void CPUDump::cycleAddressViewSlot()
+{
+    ViewEnum_t current = getCurrentView();
+
+    if(current == ViewAddressAscii || current == ViewAddress)
+        setView(ViewAddressUnicode);
+    else
+        setView(ViewAddressAscii);
+}
+
 void CPUDump::setView(ViewEnum_t view)
 {
     switch(view)
@@ -1582,6 +1751,9 @@ void CPUDump::setView(ViewEnum_t view)
     case ViewIntegerUnsignedLongLong:
         integerUnsignedLongLongSlot();
         break;
+    case ViewIntegerHexByte:
+        integerHexByteSlot();
+        break;
     case ViewIntegerHexShort:
         integerHexShortSlot();
         break;
@@ -1600,6 +1772,9 @@ void CPUDump::setView(ViewEnum_t view)
     case ViewFloatLongDouble:
         floatLongDoubleSlot();
         break;
+    case ViewFloatHalf:
+        floatHalfSlot();
+        break;
     case ViewAddress:
     case ViewAddressAscii:
         addressAsciiSlot();
@@ -1612,9 +1787,6 @@ void CPUDump::setView(ViewEnum_t view)
         break;
     case ViewTextCodepage:
         textLastCodepageSlot();
-        break;
-    default:
-        hexAsciiSlot();
         break;
     }
 }

@@ -54,11 +54,38 @@ static void setBpActive(BREAKPOINT & bp, duint addrAdjust = 0)
     }
 }
 
+static BREAKPOINT* findMemoryBreakpoint(duint Address)
+{
+    auto it = breakpoints.upper_bound(BreakpointKey(BPMEMORY, ModHashFromAddr(Address)));
+    if(it == breakpoints.begin())
+        return nullptr;
+
+    // upper_bound always returns an iterator greater than the given key
+    --it;
+
+    if(it->first.first == BPMEMORY)
+    {
+        auto & bp = it->second;
+
+        duint bpStart = ModBaseFromAddr(Address) + bp.addr; // Breakpoints that are put outside modules (heap, stack, etc), use the actual address and not RVA
+        duint bpEnd = bpStart + bp.memsize;
+
+        if(Address >= bpStart && Address < bpEnd)
+            return &bp;
+    }
+
+    return nullptr;
+}
+
 BREAKPOINT* BpInfoFromAddr(BP_TYPE Type, duint Address)
 {
     //
     // NOTE: THIS DOES _NOT_ USE LOCKS
     //
+
+    if(Type == BPMEMORY)
+        return findMemoryBreakpoint(Address);
+
     std::map<BreakpointKey, BREAKPOINT>::iterator found;
     if(Type != BPDLL && Type != BPEXCEPTION)
         found = breakpoints.find(BreakpointKey(Type, ModHashFromAddr(Address)));
@@ -312,7 +339,7 @@ bool BpGetAny(BP_TYPE Type, const char* Name, BREAKPOINT* Bp)
 
 duint BpGetDLLBpAddr(const char* fileName)
 {
-    const char* dashPos1 = max(strrchr(fileName, '\\'), strrchr(fileName, '/'));
+    const char* dashPos1 = std::max(strrchr(fileName, '\\'), strrchr(fileName, '/'));
     if(dashPos1 == nullptr)
         dashPos1 = fileName;
     else
@@ -354,7 +381,7 @@ bool BpDelete(const BREAKPOINT & Bp)
     // Extract the RVA from the breakpoint
     auto rva = Bp.addr;
     auto loadedBase = ModBaseFromName(Bp.module.c_str());
-    if(loadedBase != 0 && Bp.addr > loadedBase)
+    if(loadedBase != 0 && Bp.addr >= loadedBase)
         rva -= loadedBase;
 
     // Calculate the breakpoint key with the module hash and rva
@@ -559,9 +586,11 @@ bool BpSetSingleshoot(duint Address, BP_TYPE Type, bool singleshoot)
         {
             if(!RemoveMemoryBPX(Address, bpInfo->memsize))
                 dprintf(QT_TRANSLATE_NOOP("DBG", "Delete memory breakpoint failed (RemoveMemoryBPX): %p\n"), Address);
-            if(!SetMemoryBPXEx(Address, bpInfo->memsize, bpInfo->titantype, !singleshoot, cbMemoryBreakpoint))
+            if(!SetMemoryBPXEx(Address, bpInfo->memsize, (TitanMemoryBreakpointType)bpInfo->titantype, !singleshoot, cbMemoryBreakpoint))
                 dprintf(QT_TRANSLATE_NOOP("DBG", "Could not enable memory breakpoint %p (SetMemoryBPXEx)\n"), Address);
         }
+        break;
+    default:
         break;
     }
     return true;
@@ -774,7 +803,7 @@ static duint BpToBridgeTypeEx(const BREAKPOINT & Bp)
     return 0;
 }
 
-static duint BpToBridgeHwSize(const BREAKPOINT & Bp)
+static BPHWSIZE BpToBridgeHwSize(const BREAKPOINT & Bp)
 {
     switch(Bp.type)
     {
@@ -782,19 +811,19 @@ static duint BpToBridgeHwSize(const BREAKPOINT & Bp)
         switch(TITANGETSIZE(Bp.titantype))
         {
         case UE_HARDWARE_SIZE_1:
-            return 1;
+            return hw_byte;
         case UE_HARDWARE_SIZE_2:
-            return 2;
+            return hw_word;
         case UE_HARDWARE_SIZE_4:
-            return 4;
+            return hw_dword;
         case UE_HARDWARE_SIZE_8:
-            return 8;
+            return hw_qword;
         }
         break;
     default:
         break;
     }
-    return 0;
+    return hw_byte;
 }
 
 static duint BpToBridgeHwSlot(const BREAKPOINT & Bp)

@@ -12,23 +12,12 @@
 
 bool IsVistaOrLater()
 {
-    static bool vistaOrLater = []()
-    {
-        OSVERSIONINFOEXW osvi = { 0 };
-        osvi.dwOSVersionInfoSize = sizeof(osvi);
-        return GetVersionExW((LPOSVERSIONINFOW)&osvi) && osvi.dwMajorVersion > 5;
-    }();
-    return vistaOrLater;
+    return BridgeGetNtBuildNumber() >= 6000;
 }
 
 bool Is19042OrLater()
 {
-    static bool is19042OrLater = []()
-    {
-        auto userSharedData = SharedUserData;
-        return userSharedData->NtBuildNumber >= 19042;
-    }();
-    return is19042OrLater;
+    return BridgeGetNtBuildNumber() >= 19042;
 }
 
 bool ExHandlerGetInfo(EX_HANDLER_TYPE Type, std::vector<duint> & Entries)
@@ -95,7 +84,6 @@ bool ExHandlerGetSEH(std::vector<duint> & Entries)
     return true;
 }
 
-#pragma pack(8)
 struct VEH_ENTRY_XP
 {
     duint Flink;
@@ -143,7 +131,6 @@ bool ExHandlerGetVEH(std::vector<duint> & Entries)
     return ExHandlerGetVCH(Entries, true);
 }
 
-#pragma pack(8)
 struct VEH_ENTRY_VISTA
 {
     duint Flink;

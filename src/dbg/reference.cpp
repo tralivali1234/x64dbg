@@ -53,7 +53,7 @@ int RefFind(duint Address, duint Size, CBREF Callback, void* UserData, bool Sile
 
             // Make sure the size fits in one page
             scanStart = Address;
-            scanSize  = min(Size, maxsize);
+            scanSize  = std::min(Size, maxsize);
         }
 
         // Determine the full module name
@@ -311,6 +311,13 @@ int RefFind(duint Address, duint Size, CBREF Callback, void* UserData, bool Sile
 
 int RefFindInRange(duint scanStart, duint scanSize, CBREF Callback, void* UserData, bool Silent, REFINFO & refInfo, Zydis & zydis, bool initCallBack, const CBPROGRESS & cbUpdateProgress, bool disasmText)
 {
+    if(scanSize == 0)
+    {
+        if(!Silent)
+            dprintf(QT_TRANSLATE_NOOP("DBG", "Invalid scan size 0 passed to RefFindInRange\n"));
+        return 0;
+    }
+
     // Allocate and read a buffer from the remote process
     Memory<unsigned char*> data(scanSize, "reffind:data");
 
@@ -336,7 +343,7 @@ int RefFindInRange(duint scanStart, duint scanSize, CBREF Callback, void* UserDa
         }
 
         // Disassemble the instruction
-        int disasmMaxSize = min(MAX_DISASM_BUFFER, (int)(scanSize - i)); // Prevent going past the boundary
+        int disasmMaxSize = std::min(MAX_DISASM_BUFFER, (int)(scanSize - i)); // Prevent going past the boundary
         int disasmLen = 1;
 
         if(zydis.Disassemble(scanStart, data() + i, disasmMaxSize))

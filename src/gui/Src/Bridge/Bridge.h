@@ -1,6 +1,6 @@
 #pragma once
 
-#include <agents.h>
+#include <chrono>
 #include <QObject>
 #include <QWidget>
 #include <QMutex>
@@ -19,6 +19,7 @@ namespace Qt
 
 class ReferenceManager;
 class SymbolView;
+class QZydis;
 
 class Bridge : public QObject
 {
@@ -30,6 +31,7 @@ class Bridge : public QObject
 
 private slots:
     void throttleUpdateSlot(GUIMSG msg);
+    void configUpdatedSlot();
 
 public:
     explicit Bridge(QObject* parent = nullptr);
@@ -162,6 +164,7 @@ signals:
     void unregisterScriptLang(int id);
     void focusDisasm();
     void focusDump();
+    void focusStruct();
     void focusStack();
     void focusGraph();
     void focusMemmap();
@@ -180,6 +183,8 @@ signals:
     void typeAddNode(void* parent, const TYPEDESCRIPTOR* type);
     void typeClear();
     void typeUpdateWidget();
+    void typeVisit(QString typeName, duint addr);
+    void typeListUpdated();
     void closeApplication();
     void flushLog();
     void getDumpAttention();
@@ -198,6 +203,7 @@ private:
     duint mBridgeResults[BridgeResult::Last];
     DWORD mMainThreadId = 0;
     volatile bool mDbgStopped = false;
-    QMap<GUIMSG, DWORD> mLastUpdates;
+    QMap<GUIMSG, std::chrono::steady_clock::time_point> mLastUpdates;
     QMap<GUIMSG, QTimer*> mUpdateTimers;
+    QZydis* mDisasm = nullptr;
 };

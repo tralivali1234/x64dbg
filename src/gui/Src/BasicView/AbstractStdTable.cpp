@@ -1,6 +1,6 @@
 #include "AbstractStdTable.h"
 #include "Bridge.h"
-#include "RichTextPainter.h"
+#include <Utils/RichTextPainter.h>
 
 AbstractStdTable::AbstractStdTable(QWidget* parent) : AbstractTableView(parent)
 {
@@ -387,6 +387,7 @@ void AbstractStdTable::mousePressEvent(QMouseEvent* event)
 
                     // TODO: only update if the selection actually changed
                     updateViewport();
+                    accessibilityMousePressSetColumn(event);
 
                     accept = true;
                 }
@@ -538,12 +539,14 @@ void AbstractStdTable::expandSelectionUpTo(duint to)
         mSelection.fromIndex = to;
         mSelection.toIndex = mSelection.firstSelectedIndex;
         emit selectionChanged(to);
+        accessibilitySelectionChanged();
     }
     else if(to > mSelection.firstSelectedIndex)
     {
         mSelection.fromIndex = mSelection.firstSelectedIndex;
         mSelection.toIndex = to;
         emit selectionChanged(to);
+        accessibilitySelectionChanged();
     }
     else if(to == mSelection.firstSelectedIndex)
     {
@@ -569,6 +572,7 @@ void AbstractStdTable::expandUp()
         }
 
         emit selectionChanged(rowIndex);
+        accessibilitySelectionChanged();
     }
 }
 
@@ -593,6 +597,7 @@ void AbstractStdTable::expandDown()
 
 
         emit selectionChanged(rowIndex);
+        accessibilitySelectionChanged();
     }
 }
 
@@ -619,6 +624,7 @@ void AbstractStdTable::setSingleSelection(duint index)
     mSelection.fromIndex = index;
     mSelection.toIndex = index;
     emit selectionChanged(index);
+    accessibilitySelectionChanged();
 }
 
 duint AbstractStdTable::getInitialSelection() const
@@ -679,8 +685,12 @@ void AbstractStdTable::selectPrevious()
 
 void AbstractStdTable::selectAll()
 {
+    duint rowCount = getRowCount();
+    if(rowCount == 0)
+        return;
+
     duint index = 0;
-    duint indexEnd = getRowCount() - 1;
+    duint indexEnd = rowCount - 1;
 
     mSelection.firstSelectedIndex = index;
     mSelection.fromIndex = index;
@@ -1077,4 +1087,9 @@ duint AbstractStdTable::getAddressForPosition(int x, int y)
     }
     else
         return 0;
+}
+
+int AbstractStdTable::accessibilitySelectedRow() const
+{
+    return getInitialSelection() - getTableOffset();
 }

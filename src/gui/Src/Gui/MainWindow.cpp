@@ -2,6 +2,7 @@
 #include "ui_MainWindow.h"
 #include <QMutex>
 #include <QMessageBox>
+#include <QToolButton>
 #include <QIcon>
 #include <QUrl>
 #include <QFileDialog>
@@ -53,6 +54,7 @@
 #include "MRUList.h"
 #include "AboutDialog.h"
 #include "UpdateChecker.h"
+#include "Gui/ReleaseNotesDialog.h"
 #include "Tracer/TraceManager.h"
 //#include "Tracer/TraceWidget.h"
 #include "Utils/MethodInvoker.h"
@@ -293,12 +295,13 @@ MainWindow::MainWindow(QWidget* parent)
     makeCommandAction(ui->actioneStepInto, "eStepInto");
     makeCommandAction(ui->actioneRun, "eRun");
     makeCommandAction(ui->actioneRtr, "eRtr");
-    makeCommandAction(ui->actionRtu, "TraceOverConditional mod.user(cip)");
+    makeCommandAction(ui->actionRtu, "rtu");
     connect(ui->actionTicnd, SIGNAL(triggered()), this, SLOT(execTicnd()));
     connect(ui->actionTocnd, SIGNAL(triggered()), this, SLOT(execTocnd()));
     connect(ui->actionTRBit, SIGNAL(triggered()), mCpuWidget->getDisasmWidget(), SLOT(traceCoverageBitSlot()));
     connect(ui->actionTRByte, SIGNAL(triggered()), mCpuWidget->getDisasmWidget(), SLOT(traceCoverageByteSlot()));
     connect(ui->actionTRWord, SIGNAL(triggered()), mCpuWidget->getDisasmWidget(), SLOT(traceCoverageWordSlot()));
+    connect(ui->actionTRReset, SIGNAL(triggered()), mCpuWidget->getDisasmWidget(), SLOT(traceCoverageResetSlot()));
     connect(ui->actionTRNone, SIGNAL(triggered()), mCpuWidget->getDisasmWidget(), SLOT(traceCoverageDisableSlot()));
     makeCommandAction(ui->actionTRTIBT, "tibt");
     makeCommandAction(ui->actionTRTOBT, "tobt");
@@ -381,6 +384,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(mTabWidget, SIGNAL(tabMovedTabWidget(int, int)), this, SLOT(tabMovedSlot(int, int)));
     connect(Config(), SIGNAL(shortcutsUpdated()), this, SLOT(refreshShortcuts()));
     connect(Config(), SIGNAL(colorsUpdated()), this, SLOT(updateStyle()));
+    connect(Config(), SIGNAL(fontsUpdated()), this, SLOT(updateFont()));
 
     // Menu stuff
     actionManageFavourites = nullptr;
@@ -390,6 +394,11 @@ MainWindow::MainWindow(QWidget* parent)
     setupThemesMenu();
     setupMenuCustomization();
     ui->actionAbout_Qt->setIcon(QApplication::style()->standardIcon(QStyle::SP_TitleBarMenuButton));
+    auto toolButton = qobject_cast<QToolButton*>(ui->mainToolBar->widgetForAction(ui->actionCheckUpdates));
+    if(toolButton)
+    {
+        toolButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    }
 
     // Set default setttings (when not set)
     SettingsDialog defaultSettings;
@@ -775,9 +784,21 @@ void MainWindow::setupLanguagesMenu2()
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
+    if(DbgIsDebugging())
+    {
+        duint detachOnExit = 0;
+        if(BridgeSettingGetUint("Engine", "DetachOnExit", &detachOnExit) && detachOnExit)
+        {
+            bExitWhenDetached = true;
+            DbgCmdExec("detach");
+            event->ignore();
+            return;
+        }
+    }
+
     if(DbgIsDebugging() && ConfigBool("Gui", "ShowExitConfirmation"))
     {
-        auto cb = new QCheckBox(tr("Always stop the debuggee and exit"));
+        auto cb = new QCheckBox(tr("Remember my choice"));
         QMessageBox msgbox(this);
         msgbox.setText(tr("The debuggee is still running and will be terminated if you exit. What do you want to do?"));
         msgbox.setWindowTitle(tr("Debuggee is still running"));
@@ -798,21 +819,19 @@ void MainWindow::closeEvent(QCloseEvent* event)
         msgbox.setEscapeButton(QMessageBox::Cancel);
         msgbox.setCheckBox(cb);
 
-        QObject::connect(cb, &QCheckBox::toggled, [detachButton, restartButton](bool checked)
-        {
-            auto showConfirmation = !checked;
-            detachButton->setEnabled(showConfirmation);
-            restartButton->setEnabled(showConfirmation);
-            Config()->setBool("Gui", "ShowExitConfirmation", showConfirmation);
-        });
-
         auto code = msgbox.exec();
         if(code == QMessageBox::Retry)
             restartDebugging();
         else if(code == QMessageBox::Abort)
         {
+            if(cb->isChecked())
+                BridgeSettingSetUint("Engine", "DetachOnExit", 1);
             bExitWhenDetached = true;
             DbgCmdExec("detach");
+        }
+        else if(code == QMessageBox::Yes && cb->isChecked())
+        {
+            Config()->setBool("Gui", "ShowExitConfirmation", false);
         }
         if(code != QMessageBox::Yes)
         {
@@ -1038,6 +1057,40 @@ void MainWindow::loadWindowSettings()
     // Make x64dbg topmost
     if(ConfigBool("Gui", "Topmost"))
         ui->actionTopmost->setChecked(true);
+
+    // Display support notifications
+    if(BridgeIsARM64Emulated())
+    {
+        SimpleErrorBox(
+            this,
+            tr("Unsupported system"),
+            tr("You are running x64dbg in ARM64 emulation mode. <b>This system is not supported by x64dbg and will cause unexpected behavior.</b> Analyzing malware in this environment is dangerous and you should switch to an actual Intel/AMD CPU.<br><br>For more information, see the <a href=\"%1\">FAQ</a>.").arg("https://faq.x64dbg.com")
+        );
+    }
+    if(BridgeGetNtBuildNumber() < 10000)
+    {
+        SimpleErrorBox(
+            this,
+            tr("Unsupported system"),
+            tr("You are running x64dbg on an unsupported operating system version. <b>Future updates will completely stop running on this system.</b><br><br>For more information, see the official <a href=\"%1\">announcement</a>.").arg("https://transition.x64dbg.com"),
+            "HideErrorUnsupportedSystem"
+        );
+    }
+
+#ifdef X64DBG_RELEASE
+    auto compileDate = QDateTime(GetCompileDate());
+    compileDate.setTimeSpec(Qt::UTC);
+    auto compileEpoch = compileDate.toSecsSinceEpoch();
+    duint releaseNotesEpoch = 0;
+    BridgeSettingGetUint("Gui", "ReleaseNotesEpoch", &releaseNotesEpoch);
+    if(releaseNotesEpoch < compileEpoch)
+    {
+        showReleaseNotes(releaseNotesEpoch);
+        BridgeSettingSetUint("Gui", "ReleaseNotesPrevEpoch", releaseNotesEpoch);
+        BridgeSettingSetUint("Gui", "ReleaseNotesEpoch", compileEpoch);
+        BridgeSettingFlush();
+    }
+#endif // X64DBG_RELEASE
 }
 
 void MainWindow::setGlobalShortcut(QAction* action, const QKeySequence & key)
@@ -1165,6 +1218,55 @@ QAction* MainWindow::makeCommandAction(QAction* action, const QString & command)
     action->setData(QVariant(command));
     connect(action, SIGNAL(triggered()), this, SLOT(execCommandSlot()));
     return action;
+}
+
+void MainWindow::showReleaseNotes(duint cutoffEpoch)
+{
+    QFile file(QString("%1/../release-notes.md").arg(QCoreApplication::applicationDirPath()));
+    if(!file.open(QFile::ReadOnly))
+    {
+        SimpleErrorBox(
+            this,
+            tr("Error"),
+            tr("Release notes are not available, see <a href=\"%1\">%2</a> for the latest updates.")
+            .arg("https://update.x64dbg.com")
+            .arg("update.x64dbg.com")
+        );
+        return;
+    }
+    auto markdown = QString::fromUtf8(file.readAll());
+    file.close();
+
+    if(cutoffEpoch)
+    {
+        static QRegularExpression re(R"(<!-- *(\d\d\d\d.\d\d.\d\d) *-->)");
+        auto i = re.globalMatch(markdown);
+        bool seenCutoff = false;
+        QStringList words;
+        while(i.hasNext())
+        {
+            QRegularExpressionMatch match = i.next();
+            auto matchText = match.captured(1);
+            auto matchDate = QDateTime::fromString(matchText, "yyyy.MM.dd");
+            matchDate.setTimeSpec(Qt::UTC);
+            auto matchEpoch = matchDate.toSecsSinceEpoch();
+            if(matchEpoch <= cutoffEpoch && seenCutoff)
+            {
+                markdown = markdown.left(match.capturedStart(0));
+                break;
+            }
+            seenCutoff = true;
+        }
+    }
+
+    ReleaseNotesDialog dialog({}, this);
+    auto titleBarHeight = frameGeometry().height() - geometry().height();
+    auto position = frameGeometry().center() - dialog.frameGeometry().center();
+    position.setY(position.y() - titleBarHeight / 2);
+    dialog.move(position);
+    dialog.setMarkdown(markdown, "https://github.com/x64dbg/x64dbg/issues/");
+    dialog.setWindowIcon(DIcon("bug"));
+    dialog.exec();
 }
 
 void MainWindow::execCommandSlot()
@@ -1308,6 +1410,25 @@ bool MainWindow::event(QEvent* event)
     }
 
     return QMainWindow::event(event);
+}
+
+bool MainWindow::nativeEvent(const QByteArray & eventType, void* message, long* result)
+{
+    const auto msg = (MSG*)message;
+    if(msg->message == WM_SYSCOMMAND && (msg->wParam & 0xFFF0) == SC_CLOSE)
+    {
+        // When a modal dialog is open (QDialog::exec), the main window is disabled.
+        // DefWindowProc ignores WM_SYSCOMMAND/SC_CLOSE for disabled windows,
+        // so taskbar right-click -> "Close window" silently fails. We intercept
+        // the message here before DefWindowProc and handle it ourselves.
+        if(QApplication::activeModalWidget())
+        {
+            QApplication::closeAllWindows();
+            *result = 0;
+            return true;
+        }
+    }
+    return QMainWindow::nativeEvent(eventType, message, result);
 }
 
 void MainWindow::updateWindowTitleSlot(QString filename)
@@ -1654,7 +1775,10 @@ void MainWindow::clearMenuHelper(int hMenu, bool markAsDeleted)
             if(markAsDeleted)
                 mEntryList[i].deleted = true;
             else
+            {
+                mEntryList[i].mAction->setShortcut(QKeySequence());
                 mEntryList.erase(mEntryList.begin() + i);
+            }
         }
     }
 
@@ -2418,16 +2542,6 @@ void MainWindow::updateFavouriteTools()
     ui->menuFavourites->addAction(mFavouriteToolbar->toggleViewAction());
 }
 
-static QString stringFormatInline(const QString & format)
-{
-    if(!DbgFunctions()->StringFormatInline)
-        return QString();
-    char result[MAX_SETTING_SIZE] = "";
-    if(DbgFunctions()->StringFormatInline(format.toUtf8().constData(), MAX_SETTING_SIZE, result))
-        return result;
-    return CPUArgumentWidget::tr("[Formatting Error]");
-}
-
 void MainWindow::clickFavouriteTool()
 {
     QAction* action = qobject_cast<QAction*>(sender());
@@ -2450,7 +2564,7 @@ void MainWindow::clickFavouriteTool()
             if(sfStart < 0 || sfEnd < 0 || sfEnd < sfStart)
                 break;
             auto format = toolPath.mid(sfStart + 2, sfEnd - sfStart - 2);
-            toolPath.replace(sfStart, sfEnd - sfStart + 2, stringFormatInline(format));
+            toolPath.replace(sfStart, sfEnd - sfStart + 2, StringFormatInline(format));
         }
         GuiAddLogMessage(tr("Starting tool %1\n").arg(toolPath).toUtf8().constData());
         PROCESS_INFORMATION procinfo;
@@ -2754,10 +2868,22 @@ void MainWindow::on_actionAbout_Qt_triggered()
     delete w;
 }
 
+void MainWindow::on_actionReleaseNotes_triggered()
+{
+    duint cutoffEpoch = 0;
+    BridgeSettingGetUint("Gui", "ReleaseNotesPrevEpoch", &cutoffEpoch);
+    showReleaseNotes(cutoffEpoch);
+}
+
 void MainWindow::updateStyle()
 {
     // Set configured link color
     QPalette appPalette = QApplication::palette();
     appPalette.setColor(QPalette::Link, ConfigColor("LinkColor"));
     QApplication::setPalette(appPalette);
+}
+
+void MainWindow::updateFont()
+{
+    QApplication::setFont(ConfigFont("Application"));
 }

@@ -4,25 +4,11 @@
 #include <QSet>
 #include <QMap>
 #include "Bridge.h"
+#include "../Utils/ActionHelpers.h"
 
-class CPUWidget;
-class CPUMultiDump;
 class QPushButton;
 
-typedef struct
-{
-    const char* string;
-    unsigned int value;
-} STRING_VALUE_TABLE_t;
-
-#define SIZE_TABLE(table) (sizeof(table) / sizeof(*table))
-
-namespace Ui
-{
-    class RegistersView;
-}
-
-class RegistersView : public QScrollArea
+class RegistersView : public QScrollArea, public ActionHelper<RegistersView>
 {
     Q_OBJECT
 
@@ -31,9 +17,9 @@ public:
     enum REGISTER_NAME : int
     {
         CAX, CCX, CDX, CBX, CDI, CBP, CSI, CSP,
-#ifdef _WIN64
+#if defined(_WIN64) || defined(__x86_64__)
         R8, R9, R10, R11, R12, R13, R14, R15,
-#endif //_WIN64
+#endif //defined(_WIN64) || defined(__x86_64__)
         CIP,
         EFLAGS, CF, PF, AF, ZF, SF, TF, IF, DF, OF,
         GS, FS, ES, DS, CS, SS,
@@ -57,20 +43,20 @@ public:
         MxCsr, MxCsr_FZ, MxCsr_PM, MxCsr_UM, MxCsr_OM, MxCsr_ZM,
         MxCsr_IM, MxCsr_DM, MxCsr_DAZ, MxCsr_PE, MxCsr_UE, MxCsr_OE,
         MxCsr_ZE, MxCsr_DE, MxCsr_IE, MxCsr_RC,
-        // MMX and XMM
+        // MMX
         MM0, MM1, MM2, MM3, MM4, MM5, MM6, MM7,
+        // shared XMM, YMM, ZMM
         XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7,
-#ifdef _WIN64
+#if defined(_WIN64) || defined(__x86_64__)
         XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14, XMM15,
-#endif //_WIN64
-        // YMM
-        YMM0, YMM1, YMM2, YMM3, YMM4, YMM5, YMM6, YMM7,
-#ifdef _WIN64
-        YMM8, YMM9, YMM10, YMM11, YMM12, YMM13, YMM14, YMM15,
-#endif //_WIN64
+        // The following registers are part of AVX-512
+        XMM16, XMM17, XMM18, XMM19, XMM20, XMM21, XMM22, XMM23,
+        XMM24, XMM25, XMM26, XMM27, XMM28, XMM29, XMM30, XMM31,
+#endif //defined(_WIN64) || defined(__x86_64__)
+        K0, K1, K2, K3, K4, K5, K6, K7,
         UNKNOWN
     };
-
+protected:
     // contains viewport position of register
     struct Register_Position
     {
@@ -93,6 +79,18 @@ public:
             valuesize = 0;
             labelwidth = 0;
         }
+    };
+
+    struct alignas(16) REGDUMP_EXTENDED
+    {
+        REGISTERCONTEXT_AVX512 regcontext;
+        FLAGS flags;
+        X87FPUREGISTER x87FPURegisters[8];
+        MXCSRFIELDS MxCsrFields;
+        X87STATUSWORDFIELDS x87StatusWordFields;
+        X87CONTROLWORDFIELDS x87ControlWordFields;
+        LASTERROR lastError;
+        LASTSTATUS lastStatus;
     };
 
     // tracks position of a register relative to other registers
@@ -125,19 +123,22 @@ public:
             down = UNKNOWN;
         }
     };
-
+public:
     explicit RegistersView(QWidget* parent);
     ~RegistersView();
 
-    //QSize sizeHint() const;
+    QSize minimumSizeHint() const override { return QSize(0, 0); }
+    QSize sizeHint() const override { return QSize(200, 400); }
 
-    static void* operator new(size_t size);
-    static void operator delete(void* p);
     int getEstimateHeight();
+
+    static bool isAVX512Supported();
+
+    void setRegisters(const REGDUMP* reg);
+    void setRegisters(const REGDUMP_AVX512* reg);
 
 public slots:
     virtual void refreshShortcutsSlot();
-    virtual void displayCustomContextMenuSlot(QPoint pos);
     virtual void debugStateChangedSlot(DBGSTATE state);
     void reload();
     void ShowFPU(bool set_showfpu);
@@ -148,18 +149,23 @@ signals:
     void refresh();
 
 protected:
+    class RegistersCanvas;
     QAction* setupAction(const QIcon & icon, const QString & text);
     QAction* setupAction(const QString & text);
     // events
-    virtual void mousePressEvent(QMouseEvent* event);
-    virtual void mouseDoubleClickEvent(QMouseEvent* event);
-    virtual void mouseMoveEvent(QMouseEvent* event);
-    virtual void paintEvent(QPaintEvent* event);
-    virtual void keyPressEvent(QKeyEvent* event);
+    virtual void mousePressEvent(QMouseEvent* event) override;
+    virtual void mouseDoubleClickEvent(QMouseEvent* event) override;
+    virtual void mouseMoveEvent(QMouseEvent* event) override;
+    virtual void paintEvent(QPaintEvent* event) override;
+    virtual void resizeEvent(QResizeEvent* event) override;
+    virtual void keyPressEvent(QKeyEvent* event) override;
+    virtual void wheelEvent(QWheelEvent* event) override;
+
+    void paintRegisters(QPainter* p, const QRect & clip);
 
     // use-in-class-only methods
     void drawRegister(QPainter* p, REGISTER_NAME reg, char* value);
-    char* registerValue(const REGDUMP* regd, const REGISTER_NAME reg);
+    char* registerValue(const REGDUMP_EXTENDED* regd, const REGISTER_NAME reg);
     bool identifyRegister(const int y, const int x, REGISTER_NAME* clickedReg);
     QString helpRegister(REGISTER_NAME reg);
 
@@ -170,8 +176,8 @@ protected slots:
     void fontsUpdatedSlot();
     void shutdownSlot();
     QString getRegisterLabel(REGISTER_NAME);
-    int CompareRegisters(const REGISTER_NAME reg_name, REGDUMP* regdump1, REGDUMP* regdump2);
-    SIZE_T GetSizeRegister(const REGISTER_NAME reg_name);
+    int CompareRegisters(const REGISTER_NAME reg_name, REGDUMP_EXTENDED* regdump);
+    size_t GetSizeRegister(const REGISTER_NAME reg_name);
     QString GetRegStringValueFromValue(REGISTER_NAME reg, const char* value);
     QString GetTagWordStateString(unsigned short);
     //unsigned int GetTagWordValueFromString(const char* string);
@@ -183,7 +189,6 @@ protected slots:
     //unsigned int GetMxCsrRCValueFromString(const char* string);
     //unsigned int GetStatusWordTOPValueFromString(const char* string);
     QString GetStatusWordTOPStateString(unsigned short state);
-    void setRegisters(REGDUMP* reg);
     void appendRegister(QString & text, REGISTER_NAME reg, const char* name64, const char* name32);
 
     void onCopyToClipboardAction();
@@ -191,6 +196,8 @@ protected slots:
     void onCopySymbolToClipboardAction();
     // switch SIMD display modes
     void onSIMDMode();
+    void onXMMSizeAutoClicked();
+    void onAlwaysShowAVX512Clicked();
     void onFpuMode();
     void onCopyAllAction();
 protected:
@@ -226,7 +233,7 @@ protected:
     QSet<REGISTER_NAME> mFPUx87;
     QSet<REGISTER_NAME> mFPUMMX;
     QSet<REGISTER_NAME> mFPUXMM;
-    QSet<REGISTER_NAME> mFPUYMM;
+    QSet<REGISTER_NAME> mFPUOpmask;
     // contains all id's of registers if there occurs a change
     QSet<REGISTER_NAME> mRegisterUpdates;
     // registers that do not allow changes
@@ -238,15 +245,24 @@ protected:
     // contains names of closest registers in view
     QMap<REGISTER_NAME, Register_Relative_Position> mRegisterRelativePlaces;
     // contains a dump of the current register values
-    REGDUMP mRegDumpStruct;
-    REGDUMP mCipRegDumpStruct;
+    REGDUMP_EXTENDED mRegDumpStruct;
+    REGDUMP_EXTENDED mCipRegDumpStruct;
+    REGDUMP_EXTENDED expandContext(const REGDUMP* reg);
+    REGDUMP_EXTENDED expandContext(const REGDUMP_AVX512* reg);
     // font measures (TODO: create a class that calculates all thos values)
     unsigned int mRowHeight, mCharWidth;
     // SIMD registers display mode
     char mFpuMode; //0 = order by ST(X), 1 = order by x87rX, 2 = MMX registers
+    char mXMMMode; //0 = XMM, 1 = YMM, 2 = ZMM
+    bool mXMMModeAuto; //true = automatically switch on and off YMM/ZMM display
+    bool mXMMModeYMMOnly; //true = only show YMM registers when the user requests to show full vector length
+    bool mAlwaysShowAVX512Registers; //true = always show AVX512 registers, false = auto
+    bool mAVX512RegistersShown;
+    void autoUpdateXMMModesAndRefresh();
     dsint mCip;
+    RegistersCanvas* mCanvas = nullptr;
+    void updateCanvasSize();
     std::vector<std::pair<const char*, uint8_t>> mHighlightRegs;
-    // menu actions
     QAction* mDisplaySTX;
     QAction* mDisplayx87rX;
     QAction* mDisplayMMX;
@@ -269,4 +285,10 @@ protected:
     QAction* SIMDSQWord;
     QAction* SIMDUQWord;
     QAction* SIMDHQWord;
+    QAction* SIMDXMMSizeAuto;
+    QAction* SIMDAlwaysShowAVX512;
+    void accessibilitySelectionChanged();
+    void accessibilityValueChanged();
+    friend class AccessibleRegistersView;
+    friend class AccessibleRegistersViewItem;
 };

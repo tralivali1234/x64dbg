@@ -3,6 +3,7 @@
 #include "QZydis.h"
 #include "main.h"
 #include "Exports.h"
+#include "Configuration.h"
 
 #include "ReferenceManager.h"
 #include "SymbolView.h"
@@ -76,10 +77,10 @@ void Bridge::throttleUpdateSlot(GUIMSG msg)
     // NOTE: This is running synchronously on the UI thread
 
     auto lastUpdate = mLastUpdates[msg];
-    auto now = GetTickCount();
-    auto elapsed = now - lastUpdate;
-    const auto interval = 100;
-    if(lastUpdate > 0 && elapsed < interval)
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastUpdate);
+    const auto interval = (std::chrono::milliseconds)100;
+    if(elapsed < interval)
     {
         //qDebug() << "Delay update:" << msg2str(msg);
         QTimer* timer = mUpdateTimers[msg];
@@ -109,7 +110,7 @@ void Bridge::throttleUpdateSlot(GUIMSG msg)
 
 void Bridge::doUpdate(GUIMSG msg)
 {
-    auto start = GetTickCount();
+    auto start = std::chrono::steady_clock::now();
 
     switch(msg)
     {
@@ -186,9 +187,9 @@ void Bridge::doUpdate(GUIMSG msg)
     }
 
     // Log potentially bottlenecked updates
-    auto now = GetTickCount();
-    auto elapsed = now - start;
-    if(elapsed > 5)
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - start);
+    if(elapsed > (std::chrono::milliseconds)5)
     {
         //qDebug() << "[DebugMonitor]" << msg2str(msg) << elapsed << "ms";
     }
@@ -203,7 +204,11 @@ Bridge::Bridge(QObject* parent) : QObject(parent)
         mResultEvents[i] = CreateEventW(nullptr, true, true, nullptr);
     mMainThreadId = GetCurrentThreadId();
 
+    // Initialize QZydis disassembler
+    mDisasm = new QZydis(int(ConfigUint("Disassembler", "MaxModuleSize")), Bridge::getArchitecture());
+
     connect(this, &Bridge::throttleUpdate, this, &Bridge::throttleUpdateSlot);
+    connect(Config(), SIGNAL(tokenizerConfigUpdated()), this, SLOT(configUpdatedSlot()));
 }
 
 Bridge::~Bridge()
@@ -211,6 +216,7 @@ Bridge::~Bridge()
     EnterCriticalSection(&mCsBridge);
     for(size_t i = 0; i < BridgeResult::Last; i++)
         CloseHandle(mResultEvents[i]);
+    delete mDisasm;
     DeleteCriticalSection(&mCsBridge);
 }
 
@@ -274,6 +280,15 @@ void Bridge::emitMenuAddToList(QWidget* parent, QMenu* menu, GUIMENUTYPE hMenu, 
 void Bridge::setDbgStopped()
 {
     mDbgStopped = true;
+}
+
+void Bridge::configUpdatedSlot()
+{
+    if(mDisasm)
+    {
+        mDisasm->UpdateConfig();
+        mDisasm->UpdateArchitecture();
+    }
 }
 
 /************************************************************************************
@@ -344,7 +359,7 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
     case GUI_SCRIPT_ADD:
     {
         BridgeResult result(BridgeResult::ScriptAdd);
-        emit scriptAdd((int)param1, (const char**)param2);
+        emit scriptAdd((int)(duint)param1, (const char**)param2);
         result.Wait();
     }
     break;
@@ -354,13 +369,13 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
         break;
 
     case GUI_SCRIPT_SETIP:
-        emit scriptSetIp((int)param1);
+        emit scriptSetIp((int)(duint)param1);
         break;
 
     case GUI_SCRIPT_ERROR:
     {
         BridgeResult result(BridgeResult::ScriptMessage);
-        emit scriptError((int)param1, QString((const char*)param2));
+        emit scriptError((int)(duint)param1, QString((const char*)param2));
         result.Wait();
     }
     break;
@@ -370,7 +385,7 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
         break;
 
     case GUI_SCRIPT_SETINFOLINE:
-        emit scriptSetInfoLine((int)param1, QString((const char*)param2));
+        emit scriptSetInfoLine((int)(duint)param1, QString((const char*)param2));
         break;
 
     case GUI_SCRIPT_MESSAGE:
@@ -394,7 +409,7 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
         break;
 
     case GUI_SYMBOL_UPDATE_MODULE_LIST:
-        emit updateSymbolList((int)param1, (SYMBOLMODULEINFO*)param2);
+        emit updateSymbolList((int)(duint)param1, (SYMBOLMODULEINFO*)param2);
         break;
 
     case GUI_SYMBOL_LOG_ADD:
@@ -406,12 +421,12 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
         break;
 
     case GUI_SYMBOL_SET_PROGRESS:
-        emit setSymbolProgress((int)param1);
+        emit setSymbolProgress((int)(duint)param1);
         break;
 
     case GUI_REF_ADDCOLUMN:
         if(mReferenceManager->currentReferenceView())
-            mReferenceManager->currentReferenceView()->addColumnAtRef((int)param1, QString((const char*)param2));
+            mReferenceManager->currentReferenceView()->addColumnAtRef((int)(duint)param1, QString((const char*)param2));
         break;
 
     case GUI_REF_SETROWCOUNT:
@@ -447,7 +462,7 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
     {
         QString content;
         if(mReferenceManager->currentReferenceView())
-            content = mReferenceManager->currentReferenceView()->stdList()->getCellContent((int)param1, (int)param2);
+            content = mReferenceManager->currentReferenceView()->stdList()->getCellContent((int)(duint)param1, (int)(duint)param2);
         auto bytes = content.toUtf8();
         auto data = BridgeAlloc(bytes.size() + 1);
         memcpy(data, bytes.constData(), bytes.size());
@@ -458,7 +473,7 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
     {
         QString content;
         if(mReferenceManager->currentReferenceView())
-            content = mReferenceManager->currentReferenceView()->mCurList->getCellContent((int)param1, (int)param2);
+            content = mReferenceManager->currentReferenceView()->mCurList->getCellContent((int)(duint)param1, (int)(duint)param2);
         auto bytes = content.toUtf8();
         auto data = BridgeAlloc(bytes.size() + 1);
         memcpy(data, bytes.constData(), bytes.size());
@@ -470,13 +485,13 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
         break;
 
     case GUI_REF_SETSINGLESELECTION:
-        emit referenceSetSingleSelection((int)param1, (bool)param2);
+        emit referenceSetSingleSelection((int)(duint)param1, (bool)param2);
         break;
 
     case GUI_REF_SETPROGRESS:
         if(mReferenceManager->currentReferenceView())
         {
-            auto newProgress = (int)param1;
+            auto newProgress = (int)(duint)param1;
             if(mReferenceManager->currentReferenceView()->progress() != newProgress)
                 emit referenceSetProgress(newProgress);
         }
@@ -485,9 +500,9 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
     case GUI_REF_SETCURRENTTASKPROGRESS:
         if(mReferenceManager->currentReferenceView())
         {
-            auto newProgress = (int)param1;
+            auto newProgress = (int)(duint)param1;
             if(mReferenceManager->currentReferenceView()->currentTaskProgress() != newProgress)
-                emit referenceSetCurrentTaskProgress((int)param1, QString((const char*)param2));
+                emit referenceSetCurrentTaskProgress((int)(duint)param1, QString((const char*)param2));
         }
         break;
 
@@ -513,20 +528,19 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
         break;
 
     case GUI_SET_LAST_EXCEPTION:
-        emit setLastException((unsigned int)param1);
+        emit setLastException((unsigned int)(duint)param1);
         break;
 
     case GUI_GET_DISASSEMBLY:
     {
         duint parVA = (duint)param1;
         char* text = (char*)param2;
-        if(!text || !parVA || !DbgIsDebugging())
+        if(!text || !parVA || !DbgIsDebugging() || !mDisasm)
             return 0;
         byte_t buffer[16];
         if(!DbgMemRead(parVA, buffer, 16))
             return 0;
-        QZydis disasm(int(ConfigUint("Disassembler", "MaxModuleSize")), Bridge::getArchitecture());
-        Instruction_t instr = disasm.DisassembleAt(buffer, 16, 0, parVA);
+        Instruction_t instr = mDisasm->DisassembleAt(buffer, 16, 0, parVA);
         QString finalInstruction;
         for(const auto & curToken : instr.tokens.tokens)
             finalInstruction += curToken.text;
@@ -538,7 +552,7 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
     case GUI_MENU_ADD:
     {
         BridgeResult result(BridgeResult::MenuAdd);
-        emit menuAddMenu((int)param1, QString((const char*)param2));
+        emit menuAddMenu((int)(duint)param1, QString((const char*)param2));
         return (void*)result.Wait();
     }
     break;
@@ -546,7 +560,7 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
     case GUI_MENU_ADD_ENTRY:
     {
         BridgeResult result(BridgeResult::MenuAddEntry);
-        emit menuAddMenuEntry((int)param1, QString((const char*)param2));
+        emit menuAddMenuEntry((int)(duint)param1, QString((const char*)param2));
         return (void*)result.Wait();
     }
     break;
@@ -554,7 +568,7 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
     case GUI_MENU_ADD_SEPARATOR:
     {
         BridgeResult result(BridgeResult::MenuAddSeparator);
-        emit menuAddSeparator((int)param1);
+        emit menuAddSeparator((int)(duint)param1);
         result.Wait();
     }
     break;
@@ -562,7 +576,7 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
     case GUI_MENU_CLEAR:
     {
         BridgeResult result(BridgeResult::MenuClear);
-        emit menuClearMenu((int)param1, false);
+        emit menuClearMenu((int)(duint)param1, false);
         result.Wait();
     }
     break;
@@ -570,14 +584,14 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
     case GUI_MENU_REMOVE:
     {
         BridgeResult result(BridgeResult::MenuRemove);
-        emit menuRemoveMenuEntry((int)param1);
+        emit menuRemoveMenuEntry((int)(duint)param1);
         result.Wait();
     }
     break;
 
     case GUI_MENU_SET_ICON:
     {
-        int hMenu = (int)param1;
+        int hMenu = (int)(duint)param1;
         const ICONDATA* icon = (const ICONDATA*)param2;
         BridgeResult result(BridgeResult::MenuSetIcon);
         if(!icon)
@@ -595,7 +609,7 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
 
     case GUI_MENU_SET_ENTRY_ICON:
     {
-        int hEntry = (int)param1;
+        int hEntry = (int)(duint)param1;
         const ICONDATA* icon = (const ICONDATA*)param2;
         BridgeResult result(BridgeResult::MenuSetEntryIcon);
         if(!icon)
@@ -614,7 +628,7 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
     case GUI_MENU_SET_ENTRY_CHECKED:
     {
         BridgeResult result(BridgeResult::MenuSetEntryChecked);
-        emit setCheckedMenuEntry(int(param1), bool(param2));
+        emit setCheckedMenuEntry((int)(duint)param1, bool(param2));
         result.Wait();
     }
     break;
@@ -622,7 +636,7 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
     case GUI_MENU_SET_VISIBLE:
     {
         BridgeResult result(BridgeResult::MenuSetVisible);
-        emit setVisibleMenu(int(param1), bool(param2));
+        emit setVisibleMenu((int)(duint)param1, bool(param2));
         result.Wait();
     }
     break;
@@ -630,7 +644,7 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
     case GUI_MENU_SET_ENTRY_VISIBLE:
     {
         BridgeResult result(BridgeResult::MenuSetEntryVisible);
-        emit setVisibleMenuEntry(int(param1), bool(param2));
+        emit setVisibleMenuEntry((int)(duint)param1, bool(param2));
         result.Wait();
     }
     break;
@@ -638,7 +652,7 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
     case GUI_MENU_SET_NAME:
     {
         BridgeResult result(BridgeResult::MenuSetName);
-        emit setNameMenu(int(param1), QString((const char*)param2));
+        emit setNameMenu((int)(duint)param1, QString((const char*)param2));
         result.Wait();
     }
     break;
@@ -646,7 +660,7 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
     case GUI_MENU_SET_ENTRY_NAME:
     {
         BridgeResult result(BridgeResult::MenuSetEntryName);
-        emit setNameMenuEntry(int(param1), QString((const char*)param2));
+        emit setNameMenuEntry((int)(duint)param1, QString((const char*)param2));
         result.Wait();
     }
     break;
@@ -657,7 +671,7 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
         auto params = QString((const char*)param2).split('\1');
         if(params.length() == 2)
         {
-            emit setHotkeyMenuEntry(int(param1), params[0], params[1]);
+            emit setHotkeyMenuEntry((int)(duint)param1, params[0], params[1]);
             result.Wait();
         }
     }
@@ -836,7 +850,7 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
     break;
 
     case GUI_DUMP_AT_N:
-        emit dumpAtN((duint)param1, (int)param2);
+        emit dumpAtN((duint)param1, (int)(duint)param2);
         break;
 
     case GUI_DISPLAY_WARNING:
@@ -856,12 +870,12 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
     break;
 
     case GUI_UNREGISTER_SCRIPT_LANG:
-        emit unregisterScriptLang((int)param1);
+        emit unregisterScriptLang((int)(duint)param1);
         break;
 
     case GUI_FOCUS_VIEW:
     {
-        int hWindow = int(param1);
+        int hWindow = (int)(duint)param1;
         switch(hWindow)
         {
         case GUI_DISASSEMBLY:
@@ -983,7 +997,8 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
     break;
 
     case GUI_PROCESS_EVENTS:
-        QCoreApplication::processEvents();
+        if(GetCurrentThreadId() == mMainThreadId)
+            QCoreApplication::processEvents();
         break;
 
     case GUI_TYPE_ADDNODE:
@@ -1001,6 +1016,16 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
         result.Wait();
     }
     break;
+
+    case GUI_TYPE_VISIT:
+    {
+        emit typeVisit(QString((const char*)param1), (duint)param2);
+    }
+    break;
+
+    case GUI_TYPE_LIST_UPDATED:
+        emit typeListUpdated();
+        break;
 
     case GUI_CLOSE_APPLICATION:
         emit closeApplication();
@@ -1058,7 +1083,14 @@ void* Bridge::processMessage(GUIMSG type, void* param1, void* param2)
         break;
 
     case GUI_GET_MAIN_THREAD_ID:
-        return (void*)mMainThreadId;
+        return (void*)(duint)mMainThreadId;
+
+    case GUI_IS_DEBUGGER_FOCUSED_UNUSED:
+        break;
+
+    case GUI_SHOW_STRUCT:
+        emit focusStruct();
+        break;
 
     case GUI_UPDATE_REGISTER_VIEW:
     case GUI_UPDATE_DISASSEMBLY_VIEW:
@@ -1100,17 +1132,8 @@ __declspec(dllexport) void* _gui_sendmessage(GUIMSG type, void* param1, void* pa
 
 __declspec(dllexport) const char* _gui_translate_text(const char* source)
 {
-    if(TLS_TranslatedStringMap)
-    {
-        QByteArray translatedUtf8 = QCoreApplication::translate("DBG", source).toUtf8();
-        // Boom... VS does not support "thread_local"... and cannot use "__declspec(thread)" in a DLL... https://blogs.msdn.microsoft.com/oldnewthing/20101122-00/?p=12233
-        // Simulating Thread Local Storage with a map...
-        DWORD ThreadId = GetCurrentThreadId();
-        TranslatedStringStorage & TranslatedString = (*TLS_TranslatedStringMap)[ThreadId];
-        TranslatedString.Data[translatedUtf8.size()] = 0; // Set the string terminator first.
-        memcpy(TranslatedString.Data, translatedUtf8.constData(), std::min((size_t)translatedUtf8.size(), sizeof(TranslatedString.Data) - 1)); // Then copy the string safely.
-        return TranslatedString.Data; // Don't need to free this memory. But this pointer should be used immediately to reduce race condition.
-    }
-    else // Translators are not initialized yet.
-        return source;
+    QByteArray translatedUtf8 = QCoreApplication::translate("DBG", source).toUtf8();
+    TLS_TranslatedString.Data[translatedUtf8.size()] = 0; // Set the string terminator first.
+    memcpy(TLS_TranslatedString.Data, translatedUtf8.constData(), std::min((size_t)translatedUtf8.size(), sizeof(TLS_TranslatedString.Data) - 1)); // Then copy the string safely.
+    return TLS_TranslatedString.Data; // Don't need to free this memory. But this pointer should be used immediately to reduce race condition.
 }

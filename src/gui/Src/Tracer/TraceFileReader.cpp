@@ -5,6 +5,7 @@
 #include "MiscUtil.h"
 #include "StringUtil.h"
 #include <sysinfoapi.h>
+#include <stdexcept>
 
 TraceFileReader::TraceFileReader(QObject* parent) : QObject(parent)
 {
@@ -389,7 +390,7 @@ static bool checkKey(const QJsonObject & root, const QString & key, const QStrin
 {
     const auto obj = root.find(key);
     if(obj == root.constEnd())
-        throw std::wstring(L"Unspecified");
+        throw std::wstring(L"Missing key: " + key.toStdWString());
     QJsonValue val = obj.value();
     if(val.isString())
         if(val.toString() == value)
@@ -405,7 +406,7 @@ void TraceFileParser::readFileHeader(TraceFileReader* that)
         throw std::wstring(L"Unspecified");
     if(header.LowPart != MAKEFOURCC('T', 'R', 'A', 'C'))
         throw std::wstring(L"File type mismatch");
-    if(header.HighPart > 16384)
+    if(header.HighPart > 100 * 1024)
         throw std::wstring(L"Header info is too big");
     QByteArray jsonData = that->traceFile.read(header.HighPart);
     if(jsonData.size() != header.HighPart)
@@ -417,10 +418,10 @@ void TraceFileParser::readFileHeader(TraceFileReader* that)
 
     const auto ver = jsonRoot.find("ver");
     if(ver == jsonRoot.constEnd())
-        throw std::wstring(L"Version not supported");
-    QJsonValue verVal = ver.value();
-    if(verVal.toInt(0) != 1)
-        throw std::wstring(L"Version not supported");
+        throw std::wstring(L"Version not found");
+    const auto verVal = ver.value().toInt();
+    if(verVal != 1)
+        throw std::wstring(L"Version not supported " + std::to_wstring(verVal));
     checkKey(jsonRoot, "arch", ArchValue("x86", "x64"));
     checkKey(jsonRoot, "compression", "");
     const auto hashAlgorithmObj = jsonRoot.find("hashAlgorithm");
@@ -456,14 +457,11 @@ void TraceFileParser::readFileHeader(TraceFileReader* that)
     }
 }
 
-static bool readBlock(QFile & traceFile)
+static bool readBlock(QFile & traceFile, unsigned char blockType)
 {
     if(!traceFile.isReadable())
         throw std::wstring(L"File is not readable");
-    unsigned char blockType;
     unsigned char changedCountFlags[3]; //reg changed count, mem accessed count, flags
-    if(traceFile.read((char*)&blockType, 1) != 1)
-        throw std::wstring(L"Read block type failed");
     if(blockType == 0)
     {
         if(traceFile.read((char*)&changedCountFlags, 3) != 3)
@@ -486,8 +484,19 @@ static bool readBlock(QFile & traceFile)
         else
             return false;
     }
+    else if(blockType >= 0x80)
+    {
+        // User-defined block, skip it
+        uint32_t blockSize;
+        if(traceFile.read((char*)&blockSize, 4) != sizeof(blockSize))
+            throw std::wstring(L"Failed to read user-defined block size");
+        if(!traceFile.seek(traceFile.pos() + blockSize))
+            throw std::wstring(L"Failed to skip user-defined block");
+    }
     else
-        throw std::wstring(L"Unsupported block type");
+    {
+        throw std::wstring(L"Unsupported block type " + std::to_wstring(blockType));
+    }
     return false;
 }
 
@@ -513,21 +522,27 @@ void TraceFileParser::run()
         while(!that->traceFile.atEnd())
         {
             quint64 blockStart = that->traceFile.pos();
-            bool isPageBoundary = readBlock(that->traceFile);
-            if(isPageBoundary)
+            unsigned char blockType;
+            if(that->traceFile.read((char*)&blockType, 1) != 1)
+                throw std::wstring(L"Read block type failed");
+            bool isPageBoundary = readBlock(that->traceFile, blockType);
+            if(blockType < 0x80) //Check whether it is a non-user block
             {
-                if(lastIndex != 0)
-                    that->fileIndex.back().second.second = index - (lastIndex - 1);
-                that->fileIndex.push_back(std::make_pair(index, TraceFileReader::Range(blockStart, 0)));
-                lastIndex = index + 1;
-                //Update progress
-                that->progress.store(that->traceFile.pos() * 100 / filesize);
-                if(that->progress == 100)
-                    that->progress = 99;
-                if(this->isInterruptionRequested() && !that->traceFile.atEnd()) //Cancel loading
-                    throw std::wstring(L"Canceled");
+                if(isPageBoundary)
+                {
+                    if(lastIndex != 0)
+                        that->fileIndex.back().second.second = index - (lastIndex - 1);
+                    that->fileIndex.push_back(std::make_pair(index, TraceFileReader::Range(blockStart, 0)));
+                    lastIndex = index + 1;
+                    //Update progress
+                    that->progress.store(that->traceFile.pos() * 100 / filesize);
+                    if(that->progress == 100)
+                        that->progress = 99;
+                    if(this->isInterruptionRequested() && !that->traceFile.atEnd()) //Cancel loading
+                        throw std::wstring(L"Canceled");
+                }
+                index++;
             }
-            index++;
         }
         if(index > 0)
             that->fileIndex.back().second.second = index - (lastIndex - 1);
@@ -579,16 +594,22 @@ void TraceFileReader::purgeLastPage()
         while(!traceFile.atEnd())
         {
             quint64 blockStart = traceFile.pos();
-            bool isPageBoundary = readBlock(traceFile);
-            if(isPageBoundary)
+            unsigned char blockType;
+            if(traceFile.read((char*)&blockType, 1) != 1)
+                throw std::wstring(L"Read block type failed");
+            bool isPageBoundary = readBlock(traceFile, blockType);
+            if(blockType < 0x80) //Check whether it is a non-user block
             {
-                if(lastIndex != 0)
-                    fileIndex.back().second.second = index - (lastIndex - 1);
-                fileIndex.push_back(std::make_pair(index, TraceFileReader::Range(blockStart, 0)));
-                lastIndex = index + 1;
-                isBlockExist = true;
+                if(isPageBoundary)
+                {
+                    if(lastIndex != 0)
+                        fileIndex.back().second.second = index - (lastIndex - 1);
+                    fileIndex.push_back(std::make_pair(index, TraceFileReader::Range(blockStart, 0)));
+                    lastIndex = index + 1;
+                    isBlockExist = true;
+                }
+                index++;
             }
-            index++;
         }
         if(isBlockExist)
             fileIndex.back().second.second = index - (lastIndex - 1);
@@ -765,19 +786,19 @@ TraceFilePage::TraceFilePage(TraceFileReader* parent, unsigned long long fileOff
     try
     {
         if(mParent->traceFile.seek(fileOffset) == false)
-            throw std::exception("Failed to seek to offset");
+            throw std::runtime_error("Failed to seek to offset");
         //Process file content
         while(!mParent->traceFile.atEnd() && length < maxLength)
         {
             if(!mParent->traceFile.isReadable())
-                throw std::exception("Trace file not readable");
+                throw std::runtime_error("Trace file not readable");
             unsigned char blockType;
             unsigned char changedCountFlags[3]; //reg changed count, mem accessed count, flags
             mParent->traceFile.read((char*)&blockType, 1);
             if(blockType == 0)
             {
                 if(mParent->traceFile.read((char*)&changedCountFlags, 3) != 3)
-                    throw std::exception("Failed to read 3 bytes (truncated?)");
+                    throw std::runtime_error("Failed to read 3 bytes (truncated?)");
                 if(changedCountFlags[2] & 0x80) //Thread Id
                     mParent->traceFile.read((char*)&lastThreadId, 4);
                 threadId.push_back(lastThreadId);
@@ -785,29 +806,29 @@ TraceFilePage::TraceFilePage(TraceFileReader* parent, unsigned long long fileOff
                 {
                     QByteArray opcode = mParent->traceFile.read(changedCountFlags[2] & 0x0F);
                     if(opcode.isEmpty())
-                        throw std::exception("Failed to read opcode");
+                        throw std::runtime_error("Failed to read opcode");
                     opcodeOffset.push_back(opcodes.size());
                     opcodeSize.push_back(opcode.size());
                     opcodes.append(opcode);
                 }
                 else
-                    throw std::exception("No opcode");
+                    throw std::runtime_error("No opcode");
                 if(changedCountFlags[0] > 0) //registers
                 {
                     int lastPosition = -1;
                     if(changedCountFlags[0] > _countof(regwords)) //Bad count?
-                        throw std::exception("Bad count");
+                        throw std::runtime_error("Bad count");
                     if(mParent->traceFile.read((char*)changed, changedCountFlags[0]) != changedCountFlags[0])
-                        throw std::exception("Could not read changed regs");
+                        throw std::runtime_error("Could not read changed regs");
                     if(mParent->traceFile.read((char*)regContent, changedCountFlags[0] * sizeof(duint)) != changedCountFlags[0] * sizeof(duint))
-                        throw std::exception("Could not read changed content");
+                        throw std::runtime_error("Could not read changed content");
                     for(int i = 0; i < changedCountFlags[0]; i++)
                     {
                         lastPosition = lastPosition + changed[i] + 1;
                         if(lastPosition < _countof(regwords) && lastPosition >= 0)
                             regwords[lastPosition] = regContent[i];
                         else //out of bounds?
-                            throw std::exception("Changes out of bounds?");
+                            throw std::runtime_error("Changes out of bounds?");
                     }
                     mRegisters.push_back(registers);
                 }
@@ -815,22 +836,22 @@ TraceFilePage::TraceFilePage(TraceFileReader* parent, unsigned long long fileOff
                 {
                     QByteArray memflags;
                     if(changedCountFlags[1] > _countof(memAddress)) //too many memory operands?
-                        throw std::exception("Too many memory operands?");
+                        throw std::runtime_error("Too many memory operands?");
                     memflags = mParent->traceFile.read(changedCountFlags[1]);
                     if(memflags.length() < changedCountFlags[1])
-                        throw std::exception("Memory operand count mismatch");
+                        throw std::runtime_error("Memory operand count mismatch");
                     memoryOperandOffset.push_back(memOperandOffset);
                     memOperandOffset += changedCountFlags[1];
                     if(mParent->traceFile.read((char*)memAddress, sizeof(duint) * changedCountFlags[1]) != sizeof(duint) * changedCountFlags[1])
-                        throw std::exception("Failed to read memory change addresses");
+                        throw std::runtime_error("Failed to read memory change addresses");
                     if(mParent->traceFile.read((char*)memOldContent, sizeof(duint) * changedCountFlags[1]) != sizeof(duint) * changedCountFlags[1])
-                        throw std::exception("Failed to read memory change content");
+                        throw std::runtime_error("Failed to read memory change content");
                     for(unsigned char i = 0; i < changedCountFlags[1]; i++)
                     {
                         if((memflags[i] & 1) == 0)
                         {
                             if(mParent->traceFile.read((char*)&memNewContent[i], sizeof(duint)) != sizeof(duint))
-                                throw std::exception("Failed to read memory content");
+                                throw std::runtime_error("Failed to read memory content");
                         }
                         else
                             memNewContent[i] = memOldContent[i];
@@ -847,11 +868,22 @@ TraceFilePage::TraceFilePage(TraceFileReader* parent, unsigned long long fileOff
                     memoryOperandOffset.push_back(memOperandOffset);
                 length++;
             }
+            else if(blockType >= 0x80)
+            {
+                // User-defined block, skip it
+                uint32_t blockSize;
+                if(mParent->traceFile.read((char*)&blockSize, 4) != sizeof(blockSize))
+                    throw std::runtime_error("Failed to read user-defined block size");
+                if(!mParent->traceFile.seek(mParent->traceFile.pos() + blockSize))
+                    throw std::runtime_error("Failed to skip user-defined block");
+            }
             else
-                throw std::exception("Unexpected block type");
+            {
+                throw std::runtime_error("Unexpected block type: " + std::to_string(blockType));
+            }
         }
     }
-    catch(const std::exception & x)
+    catch(const std::runtime_error & x)
     {
         mParent->error = true;
         mParent->errorMessage = QString("[TraceFilePage::TraceFilePage] %1").arg(x.what());

@@ -1,12 +1,25 @@
 #pragma once
 
 #include "RegistersView.h"
+#include "CommonActions.h"
+
+class CPUWidget;
+class CPUMultiDump;
+
+typedef struct
+{
+    const char* string;
+    unsigned int value;
+} STRING_VALUE_TABLE_t;
+
+#define SIZE_TABLE(table) (sizeof(table) / sizeof(*table))
 
 class CPURegistersView : public RegistersView
 {
     Q_OBJECT
 public:
     CPURegistersView(CPUWidget* parent = nullptr);
+    void setRegisterData(REGISTER_NAME reg, const void* data, size_t size);
 
 public slots:
     void setRegister(REGISTER_NAME reg, duint value);
@@ -39,9 +52,13 @@ protected slots:
     void disasmSelectionChangedSlot(duint va);
 
 private:
+    QString registerNameForSet(REGISTER_NAME reg) const;
     void CreateDumpNMenu(QMenu* dumpMenu);
     void displayEditDialog();
+    void setupContextMenu();
 
+    MenuBuilder* mMenuBuilder;
+    CommonActions* mCommonActions;
     CPUWidget* mParent;
     // context menu actions
     QAction* mFollowInDump;

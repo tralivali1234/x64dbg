@@ -1,7 +1,8 @@
-#include "cmd-analysis.h"
 #include "ntdll/ntdll.h"
+#include "cmd-analysis.h"
 #include "linearanalysis.h"
 #include "memory.h"
+#include "module.h"
 #include "exceptiondirectoryanalysis.h"
 #include "controlflowanalysis.h"
 #include "analysis_nukem.h"
@@ -90,29 +91,17 @@ bool cbInstrAnalrecur(int argc, char* argv[])
     duint entry;
     if(!valfromstring(argv[1], &entry, false))
         return false;
-#ifdef _WIN64
-    // find the closest function
-    {
-        SHARED_ACQUIRE(LockModules);
-        auto info = ModInfoFromAddr(entry);
-        if(info)
-        {
-            DWORD rva = DWORD(entry - info->base);
-            auto runtimeFunction = info->findRuntimeFunction(rva);
-            if(runtimeFunction)
-            {
-                if(runtimeFunction->BeginAddress < rva)
-                {
-                    entry = info->base + runtimeFunction->BeginAddress;
-                }
-            }
-        }
-    }
-#endif // _WIN64
-    duint size;
+
+    // Attempt to guess function entry point with module/symbol information
+    auto funcEntry = ModFunctionEntryGuessFromAddr(entry);
+    if(funcEntry != 0)
+        entry = funcEntry;
+
+    duint size = 0;
     auto base = MemFindBaseAddr(entry, &size);
     if(!base)
         return false;
+
     RecursiveAnalysis analysis(base, size, entry, true);
     analysis.Analyse();
     analysis.SetMarkers();
@@ -289,8 +278,11 @@ bool cbInstrImageinfo(int argc, char* argv[])
             dputs(QT_TRANSLATE_NOOP("DBG", "Invalid argument"));
             return false;
         }
-        c = GetPE32DataFromMappedFile(modinfo->fileMapVA, 0, UE_CHARACTERISTICS);
-        dllc = GetPE32DataFromMappedFile(modinfo->fileMapVA, 0, UE_DLLCHARACTERISTICS);
+        if(auto headers = modinfo->headers)
+        {
+            c = headers->FileHeader.Characteristics;
+            dllc = headers->OptionalHeader.DllCharacteristics;
+        }
         mod = modinfo->base;
     }
 

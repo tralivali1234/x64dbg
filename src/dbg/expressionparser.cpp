@@ -140,6 +140,7 @@ ExpressionParser::ExpressionParser(const String & expression)
     const size_t r = 50;
     mTokens.reserve(r);
     mCurToken.reserve(r);
+    mIsConstValue = false;
     tokenize();
 #if 0
     // Print the tokens for debugging
@@ -150,6 +151,13 @@ ExpressionParser::ExpressionParser(const String & expression)
     }
     dprintf_untranslated("\n");
 #endif
+    if(mTokens.size() == 1)
+    {
+        if(mTokens[0].type() == Token::Type::NumericLiteral)
+        {
+            mIsConstValue = true;
+        }
+    }
     shuntingYard();
 }
 
@@ -366,7 +374,7 @@ void ExpressionParser::tokenize()
     }
     if(mCurToken.length() != 0) //make sure the last token is added
     {
-        mTokens.push_back(Token(mCurToken, resolveQuotedData()));
+        mTokens.push_back(Token(mCurToken, resolveQuotedData()).tryConvertToNumericLiteral());
         mCurToken.clear();
         mCurTokenQuoted.clear();
     }
@@ -382,7 +390,7 @@ void ExpressionParser::addOperatorToken(const String & data, Token::Type type)
         }
         else
         {
-            mTokens.push_back(Token(mCurToken, resolveQuotedData()));
+            mTokens.push_back(Token(mCurToken, resolveQuotedData()).tryConvertToNumericLiteral());
         }
         mCurToken.clear();
         mCurTokenQuoted.clear();
@@ -404,7 +412,7 @@ bool ExpressionParser::isUnaryOperator() const
         return true;
     auto lastType = mTokens.back().type();
     //if the previous token is not data or a close bracket, this operator is a unary operator
-    return lastType != Token::Type::Data && lastType != Token::Type::QuotedData && lastType != Token::Type::CloseParen;
+    return lastType != Token::Type::Data && lastType != Token::Type::QuotedData && lastType != Token::Type::NumericLiteral && lastType != Token::Type::CloseParen;
 }
 
 void ExpressionParser::shuntingYard()
@@ -424,6 +432,7 @@ void ExpressionParser::shuntingYard()
         {
         case Token::Type::Data: //If the token is a number, then push it to the output queue.
         case Token::Type::QuotedData:
+        case Token::Type::NumericLiteral:
             queue.push_back(token);
             break;
         case Token::Type::Function: //If the token is a function token, then push it onto the stack.
@@ -519,20 +528,20 @@ void ExpressionParser::shuntingYard()
     mPrefixTokens = std::move(queue);
 }
 
-#if defined(_WIN64) && (!defined(__clang__) || __clang_major__ > 3) // This produces an ICE under Clang <= 3.8; fixed in 5.0.
+#if defined(_WIN64)
 #include <intrin.h>
 
 static unsigned long long umulhi(unsigned long long x, unsigned long long y)
 {
     unsigned __int64 res;
-    _umul128(x, y, &res);
+    (void)_umul128(x, y, &res);
     return res;
 }
 
 static long long mulhi(long long x, long long y)
 {
     __int64 res;
-    _mul128(x, y, &res);
+    (void)_mul128(x, y, &res);
     return res;
 }
 #else
@@ -712,10 +721,10 @@ static bool handleAssignment(const char* variable, duint resultv, bool silent, b
     valfromstring_noexpr(variable, &temp, true, true, nullptr, &destIsVar, nullptr); //there is no return check on this because the destination might not exist yet
     if(!destIsVar)
         destIsVar = vargettype(variable, nullptr);
-    if(!destIsVar || !valtostring(variable, resultv, true))
+    if(!destIsVar || !valsetscalar(variable, resultv, true))
     {
         duint value;
-        if(valfromstring(variable, &value)) //if the var is a value already it's an invalid destination
+        if(valrequiresbuffer(variable) || valfromstring(variable, &value)) //if the var is a value already it's an invalid destination
         {
             if(!silent)
                 dprintf(QT_TRANSLATE_NOOP("DBG", "invalid dest \"%s\"\n"), variable);
@@ -829,6 +838,18 @@ bool ExpressionParser::signedOperation(Token::Type type, const EvalValue & op1, 
 
 bool ExpressionParser::Calculate(duint & value, bool signedcalc, bool allowassign, bool silent, bool baseonly, int* value_size, bool* isvar, bool* hexonly) const
 {
+    if(mIsConstValue && mTokens[0].type() == Token::Type::NumericLiteral)
+    {
+        // Just a number, optimize this very common case for tracing performance
+        value = mTokens[0].info();
+        if(isvar)
+            *isvar = false;
+        if(value_size)
+            *value_size = sizeof(duint);
+        if(hexonly)
+            *hexonly = false;
+        return true;
+    }
     EvalValue evalue(0);
     if(!Calculate(evalue, signedcalc, allowassign, silent, baseonly, value_size, isvar, hexonly))
         return false;
@@ -1005,7 +1026,7 @@ bool ExpressionParser::Calculate(EvalValue & value, bool signedcalc, bool allowa
                 return signature;
             };
 
-            if(stack.size() < requiredArguments || argCount > argTypes.size())
+            if(argCount < requiredArguments || argCount > argTypes.size() || stack.size() < argCount)
             {
                 if(!silent)
                 {
@@ -1138,7 +1159,21 @@ bool ExpressionParser::Calculate(EvalValue & value, bool signedcalc, bool allowa
                 stack.emplace_back(result.number);
         }
         else
-            stack.push_back(EvalValue(token.data(), token.type() == Token::Type::QuotedData));
+        {
+            switch(token.type())
+            {
+            default:
+            case Token::Type::Data:
+                stack.push_back(EvalValue(token.data(), false));
+                break;
+            case Token::Type::QuotedData:
+                stack.push_back(EvalValue(token.data(), true));
+                break;
+            case Token::Type::NumericLiteral:
+                stack.push_back(EvalValue(token.info()));
+                break;
+            }
+        }
     }
     if(stack.size() != 1) //there should only be one value left on the stack
         return false;

@@ -4,6 +4,7 @@
 @brief Implements the symbolinfo class.
 */
 
+#include "ntdll/ntdll.h"
 #include "symbolinfo.h"
 #include "debugger.h"
 #include "console.h"
@@ -11,7 +12,6 @@
 #include "addrinfo.h"
 #include "dbghelp_safe.h"
 #include "exception.h"
-#include "ntdll/ntdll.h"
 #include "WinInet-Downloader/downslib.h"
 #include <shlwapi.h>
 
@@ -189,6 +189,12 @@ static void SymSetProgress(int percentage, const char* pdbBaseFile)
     GuiSymbolSetProgress(percentage);
 }
 
+template<class... Args>
+static void symprintf(const char* format, Args... args)
+{
+    GuiSymbolLogAdd(StringUtils::sprintf(GuiTranslateText(format), args...).c_str());
+}
+
 bool SymDownloadSymbol(duint Base, const char* SymbolStore)
 {
     struct DownloadBaseGuard
@@ -196,7 +202,6 @@ bool SymDownloadSymbol(duint Base, const char* SymbolStore)
         DownloadBaseGuard(duint downloadBase) { symbolDownloadingBase = downloadBase; GuiRepaintTableView(); }
         ~DownloadBaseGuard() { symbolDownloadingBase = 0; GuiRepaintTableView(); }
     } g(Base);
-#define symprintf(format, ...) GuiSymbolLogAdd(StringUtils::sprintf(GuiTranslateText(format), __VA_ARGS__).c_str())
 
     // Default to Microsoft's symbol server
     if(!SymbolStore)
@@ -488,22 +493,38 @@ bool SymbolFromAddressExact(duint address, SYMBOLINFO* info)
         }
     }
 
+    // module entry point pseudo-symbol
     if(modInfo->entry != 0 && modInfo->entrySymbol.rva == rva)
     {
         modInfo->entrySymbol.convertToGuiSymbol(base, info);
         return true;
     }
 
-    // search in module imports
+    // search in module imports (iat)
     {
         auto modImport = modInfo->findImport(rva);
         if(modImport != nullptr)
         {
+            // for imports by ordinal, try to resolve the real symbol
+            if(modImport->ordinal != -1)
+            {
+                duint exportAddress = 0;
+                if(DbgMemRead(address, &exportAddress, sizeof(exportAddress)) && exportAddress != 0)
+                {
+                    if(SymbolFromAddressExact(exportAddress, info))
+                    {
+                        // override the address of the export symbol with the IAT address
+                        info->addr = address;
+                        return true;
+                    }
+                }
+            }
+
+            // fall back to the import symbol itself
             modImport->copyToGuiSymbol(base, info);
             return true;
         }
     }
-
     return false;
 }
 
@@ -547,7 +568,8 @@ bool SymbolFromAddressExactOrLower(duint address, SYMBOLINFO* info)
                 return it;
             // right now 'it' points to the first element bigger than rva
             return it == modInfo->exportsByRva.begin() ? modInfo->exportsByRva.end() : --it;
-        }();
+        }
+        ();
 
         if(it != modInfo->exportsByRva.end())
         {

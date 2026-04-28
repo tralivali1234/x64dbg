@@ -24442,8 +24442,8 @@ static ZyanStatus ZydisDecodeOperandMemory(const ZydisDecoderContext* context,
             operand->mem.index =
                 ZydisRegisterEncode(vidx_register_class ? vidx_register_class : ZYDIS_REGCLASS_GPR32,
                                     ZydisCalcRegisterId(context, instruction,
-                                            vidx_register_class ? ZYDIS_REG_ENCODING_VIDX : ZYDIS_REG_ENCODING_INDEX,
-                                            vidx_register_class ? vidx_register_class : ZYDIS_REGCLASS_GPR32));
+                                        vidx_register_class ? ZYDIS_REG_ENCODING_VIDX : ZYDIS_REG_ENCODING_INDEX,
+                                        vidx_register_class ? vidx_register_class : ZYDIS_REGCLASS_GPR32));
             operand->mem.scale = (1 << instruction->raw.sib.scale);
             if(operand->mem.index == ZYDIS_REGISTER_ESP)
             {
@@ -24501,8 +24501,8 @@ static ZyanStatus ZydisDecodeOperandMemory(const ZydisDecoderContext* context,
             operand->mem.index =
                 ZydisRegisterEncode(vidx_register_class ? vidx_register_class : ZYDIS_REGCLASS_GPR64,
                                     ZydisCalcRegisterId(context, instruction,
-                                            vidx_register_class ? ZYDIS_REG_ENCODING_VIDX : ZYDIS_REG_ENCODING_INDEX,
-                                            vidx_register_class ? vidx_register_class : ZYDIS_REGCLASS_GPR64));
+                                        vidx_register_class ? ZYDIS_REG_ENCODING_VIDX : ZYDIS_REG_ENCODING_INDEX,
+                                        vidx_register_class ? vidx_register_class : ZYDIS_REGCLASS_GPR64));
             operand->mem.scale = (1 << instruction->raw.sib.scale);
             if(operand->mem.index == ZYDIS_REGISTER_RSP)
             {
@@ -24646,12 +24646,12 @@ static void ZydisDecodeOperandImplicitMemory(const ZydisDecoder* decoder,
     case ZYDIS_IMPLMEM_BASE_AGPR_REG:
         operand->mem.base = ZydisRegisterEncode(lookup[context->easz_index],
                                                 ZydisCalcRegisterId(context, instruction, ZYDIS_REG_ENCODING_REG,
-                                                        lookup[context->easz_index]));
+                                                    lookup[context->easz_index]));
         break;
     case ZYDIS_IMPLMEM_BASE_AGPR_RM:
         operand->mem.base = ZydisRegisterEncode(lookup[context->easz_index],
                                                 ZydisCalcRegisterId(context, instruction, ZYDIS_REG_ENCODING_RM,
-                                                        lookup[context->easz_index]));
+                                                    lookup[context->easz_index]));
         break;
     case ZYDIS_IMPLMEM_BASE_AAX:
         operand->mem.base = ZydisRegisterEncode(lookup[context->easz_index], 0);

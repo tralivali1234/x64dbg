@@ -142,25 +142,35 @@ void BreakpointsView::updateColors()
     updateBreakpointsSlot();
 }
 
+struct SortFnHelper
+{
+    bool ascending;
+    const StdTable::SortBy::t & sortFn;
+    const QString & s;
+    SortFnHelper(bool ascending, const StdTable::SortBy::t & sortFn, const QString & s) : ascending(ascending), sortFn(sortFn), s(s) { }
+    bool operator<(const SortFnHelper & b) const
+    {
+        // NOTE: Same as StdTable::sortRows
+        auto less = sortFn(s, b.s);
+        return ascending ? less : !less;
+    }
+};
+
 void BreakpointsView::sortRows(duint column, bool ascending)
 {
-    std::stable_sort(mData.begin(), mData.end(), [this, column, ascending](const std::vector<CellData> & a, const std::vector<CellData> & b)
+    auto sortFn = mColumnSortFunctions.at(column);
+    std::stable_sort(mData.begin(), mData.end(), [this, column, ascending, &sortFn](const std::vector<CellData> & a, const std::vector<CellData> & b)
     {
-        //this function sorts on header type first and then on column content
-        auto aBp = &mBps.at(a.at(ColAddr).userdata), bBp = &mBps.at(b.at(ColAddr).userdata);
-        auto aType = aBp->type, bType = bBp->type;
-        auto aHeader = aBp->addr || aBp->active, bHeader = bBp->addr || bBp->active;
-        struct Hax
-        {
-            const bool & greater;
-            const QString & s;
-            Hax(const bool & greater, const QString & s) : greater(greater), s(s) { }
-            bool operator<(const Hax & b)
-            {
-                return greater ? s > b.s : s < b.s;
-            }
-        } aHax(!ascending, a.at(column).text), bHax(!ascending, b.at(column).text);
-        return std::tie(aType, aHeader, aHax) < std::tie(bType, bHeader, bHax);
+        // We sort by breakpoint type, then the (empty) headers and only then we consider the content of the column
+        auto aBp = &mBps.at(a.at(ColAddr).userdata);
+        auto bBp = &mBps.at(b.at(ColAddr).userdata);
+        auto aType = aBp->type;
+        auto bType = bBp->type;
+        auto aHeader = aBp->addr || aBp->active;
+        auto bHeader = bBp->addr || bBp->active;
+        SortFnHelper aText(ascending, sortFn, a.at(column).text);
+        SortFnHelper bText(ascending, sortFn, b.at(column).text);
+        return std::tie(aType, aHeader, aText) < std::tie(bType, bHeader, bText);
     });
 }
 
@@ -375,7 +385,8 @@ void BreakpointsView::updateBreakpointsSlot()
                     default:
                         return QString();
                     }
-                }(BPHWSIZE(bp.hwSize));
+                }
+                (BPHWSIZE(bp.hwSize));
 
                 switch(bp.typeEx)
                 {
@@ -419,7 +430,8 @@ void BreakpointsView::updateBreakpointsSlot()
                     default:
                         return QString();
                     }
-                }(BPMEMTYPE(bp.typeEx));
+                }
+                (BPMEMTYPE(bp.typeEx));
                 next();
                 colored(op, mSummaryKeywordColor);
                 colored("(", mSummaryParenColor);
@@ -483,62 +495,62 @@ void BreakpointsView::updateBreakpointsSlot()
                 colored(")", mSummaryParenColor);
             }
 
+            //fast resume skips all other steps if break condition is evaluated to false
             if(bp.fastResume)
             {
                 next();
                 colored(tr("fastresume"), mSummaryKeywordColor);
                 colored("()", mSummaryParenColor);
             }
-            else //fast resume skips all other steps
-            {
-                if(!bp.logText.isEmpty())
-                {
-                    next();
-                    if(!bp.logCondition.isEmpty())
-                    {
-                        colored(tr("logif"), mSummaryKeywordColor);
-                        colored("(", mSummaryParenColor);
-                        text(bp.logCondition);
-                        colored(",", mSummaryParenColor);
-                        text(" ");
-                    }
-                    else
-                    {
-                        colored(tr("log"), mSummaryKeywordColor);
-                        colored("(", mSummaryParenColor);
-                    }
-                    colored(QString("\"%1\"").arg(bp.logText), mSummaryStringColor);
-                    if(!bp.logFile.isEmpty())
-                    {
-                        colored(", ", mSummaryParenColor);
-                        colored("file", mSummaryKeywordColor);
-                        colored("(", mSummaryParenColor);
-                        colored(bp.logFile, mSummaryStringColor);
-                        colored(")", mSummaryParenColor);
-                    }
-                    colored(")", mSummaryParenColor);
-                }
 
-                if(!bp.commandText.isEmpty())
+            if(!bp.logText.isEmpty())
+            {
+                next();
+                if(!bp.logCondition.isEmpty())
                 {
-                    next();
-                    if(!bp.commandCondition.isEmpty())
-                    {
-                        colored(tr("cmdif"), mSummaryKeywordColor);
-                        colored("(", mSummaryParenColor);
-                        text(bp.commandCondition);
-                        colored(",", mSummaryParenColor);
-                        text(" ");
-                    }
-                    else
-                    {
-                        colored(tr("cmd"), mSummaryKeywordColor);
-                        colored("(", mSummaryParenColor);
-                    }
-                    colored(QString("\"%1\"").arg(bp.commandText), mSummaryStringColor);
+                    colored(tr("logif"), mSummaryKeywordColor);
+                    colored("(", mSummaryParenColor);
+                    text(bp.logCondition);
+                    colored(",", mSummaryParenColor);
+                    text(" ");
+                }
+                else
+                {
+                    colored(tr("log"), mSummaryKeywordColor);
+                    colored("(", mSummaryParenColor);
+                }
+                colored(QString("\"%1\"").arg(bp.logText), mSummaryStringColor);
+                if(!bp.logFile.isEmpty())
+                {
+                    colored(", ", mSummaryParenColor);
+                    colored("file", mSummaryKeywordColor);
+                    colored("(", mSummaryParenColor);
+                    colored(bp.logFile, mSummaryStringColor);
                     colored(")", mSummaryParenColor);
                 }
+                colored(")", mSummaryParenColor);
             }
+
+            if(!bp.commandText.isEmpty())
+            {
+                next();
+                if(!bp.commandCondition.isEmpty())
+                {
+                    colored(tr("cmdif"), mSummaryKeywordColor);
+                    colored("(", mSummaryParenColor);
+                    text(bp.commandCondition);
+                    colored(",", mSummaryParenColor);
+                    text(" ");
+                }
+                else
+                {
+                    colored(tr("cmd"), mSummaryKeywordColor);
+                    colored("(", mSummaryParenColor);
+                }
+                colored(QString("\"%1\"").arg(bp.commandText), mSummaryStringColor);
+                colored(")", mSummaryParenColor);
+            }
+
             QString result;
             for(auto & token : richSummary)
                 result += token.text;
@@ -604,7 +616,7 @@ void BreakpointsView::followBreakpointSlot()
         GuiAddStatusBarMessage(tr("Cannot follow this breakpoint.\n").toUtf8().constData());
         return;
     }
-    if(DbgFunctions()->MemIsCodePage(addr, false))
+    if(DbgFunctions()->MemIsCodePage(addr, true))
         DbgCmdExecDirect(QString("disasm %1").arg(ToPtrString(addr)));
     else
     {
@@ -674,7 +686,8 @@ void BreakpointsView::resetHitCountBreakpointSlot()
             default:
                 return QString("invalid");
             }
-        }());
+        }
+        ());
     }
 }
 
@@ -699,7 +712,8 @@ void BreakpointsView::enableAllBreakpointsSlot()
         default:
             return "invalid";
         }
-    }());
+    }
+    ());
 }
 
 void BreakpointsView::disableAllBreakpointsSlot()
@@ -723,7 +737,8 @@ void BreakpointsView::disableAllBreakpointsSlot()
         default:
             return "invalid";
         }
-    }());
+    }
+    ());
 }
 
 void BreakpointsView::removeAllBreakpointsSlot()
@@ -747,20 +762,21 @@ void BreakpointsView::removeAllBreakpointsSlot()
         default:
             return "invalid";
         }
-    }());
+    }
+    ());
 }
 
 void BreakpointsView::addDllBreakpointSlot()
 {
     QString fileName;
-    if(SimpleInputBox(this, tr("Enter the module name"), "", fileName, tr("Example: mydll.dll"), &DIcon("breakpoint")) && !fileName.isEmpty())
+    if(SimpleInputBox(this, tr("Enter the module name"), "", fileName, tr("Example: mydll.dll"), DIcon("breakpoint")) && !fileName.isEmpty())
         DbgCmdExec(QString("bpdll \"%1\"").arg(fileName));
 }
 
 void BreakpointsView::addExceptionBreakpointSlot()
 {
     QString exception;
-    if(SimpleChoiceBox(this, tr("Enter the exception code"), "", mExceptionList, exception, true, tr("Example: EXCEPTION_ACCESS_VIOLATION"), &DIcon("breakpoint"), mExceptionMaxLength) && !exception.isEmpty())
+    if(SimpleChoiceBox(this, tr("Enter the exception code"), "", mExceptionList, exception, true, tr("Example: EXCEPTION_ACCESS_VIOLATION"), DIcon("breakpoint"), mExceptionMaxLength) && !exception.isEmpty())
         DbgCmdExec((QString("SetExceptionBPX ") + exception));
 }
 

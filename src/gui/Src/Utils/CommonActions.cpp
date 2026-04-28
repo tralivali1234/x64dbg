@@ -8,6 +8,9 @@
 #include "Breakpoints.h"
 #include "LineEditDialog.h"
 #include "WordEditDialog.h"
+#include "GotoDialog.h"
+#include "DisplayTypeDialog.h"
+#include <BasicView/Disassembly.h>
 
 CommonActions::CommonActions(QWidget* parent, ActionHelperFuncs funcs, GetSelectionFunc getSelection)
     : QObject(parent), ActionHelperProxy(funcs), mGetSelection(getSelection)
@@ -79,6 +82,15 @@ void CommonActions::build(MenuBuilder* builder, int actions)
     if(actions & ActionGraph)
     {
         builder->addAction(makeShortcutDescAction(DIcon("graph"), tr("Graph"), tr("Show the control flow graph of this function in CPU view. Equivalent command \"graph address\"."), std::bind(&CommonActions::graphSlot, this), "ActionGraph"));
+    }
+    if(actions & ActionDisplayType)
+    {
+        auto action = makeShortcutDescAction(DIcon("visitstruct"), tr("Display type at %1").arg("0"), tr("Display a type at this address in the struct view."), std::bind(&CommonActions::displayTypeSlot, this), "ActionDisplayType");
+        builder->addAction(action, [this, action](QMenu*)
+        {
+            action->setText(tr("Display type at %1").arg(ToPtrString(mGetSelection())));
+            return true;
+        });
     }
     if(actions & ActionBreakpoint)
     {
@@ -312,7 +324,7 @@ void CommonActions::setBookmarkSlot()
 // Give a warning about the selected address is not executable
 bool CommonActions::WarningBoxNotExecutable(const QString & text, duint va) const
 {
-    if(DbgFunctions()->IsDepEnabled() && !DbgFunctions()->MemIsCodePage(va, false))
+    if(DbgFunctions()->IsDepEnabled() && !DbgFunctions()->MemIsCodePage(va, true))
     {
         QMessageBox msgyn(QMessageBox::Warning, tr("Address %1 is not executable").arg(ToPtrString(va)), text, QMessageBox::Yes | QMessageBox::No, widgetparent());
         msgyn.setWindowIcon(DIcon("compile-warning"));
@@ -329,6 +341,45 @@ void CommonActions::toggleInt3BPActionSlot()
 {
     if(!DbgIsDebugging())
         return;
+    if(auto disasm = qobject_cast<Disassembly*>(parent()))
+    {
+        auto selectionStart = disasm->getSelectionStart();
+        auto selectionEnd = disasm->getSelectionEnd();
+        duint warningVa = 0;
+
+        disasm->prepareDataRange(selectionStart, selectionEnd, [&](int, const Instruction_t & inst)
+        {
+            duint va = disasm->rvaToVa(inst.rva);
+            BPXTYPE bpType = DbgGetBpxTypeAt(va);
+            if((bpType & bp_normal) != bp_normal && !DbgFunctions()->MemIsCodePage(va, true))
+            {
+                warningVa = va;
+                return false;
+            }
+            return true;
+        });
+
+        if(warningVa)
+        {
+            if(!WarningBoxNotExecutable(tr("Setting software breakpoint here may result in crash. Do you really want to continue?"), warningVa))
+                return;
+        }
+
+        disasm->prepareDataRange(selectionStart, selectionEnd, [&](int, const Instruction_t & inst)
+        {
+            duint va = disasm->rvaToVa(inst.rva);
+            BPXTYPE bpType = DbgGetBpxTypeAt(va);
+            QString cmd;
+            if((bpType & bp_normal) == bp_normal)
+                cmd = "bc " + ToPtrString(va);
+            else
+                cmd = "bp " + ToPtrString(va);
+            DbgCmdExec(cmd);
+            return true;
+        });
+        return;
+    }
+
     duint va = mGetSelection();
     BPXTYPE bpType = DbgGetBpxTypeAt(va);
     QString cmd;
@@ -450,6 +501,11 @@ void CommonActions::graphSlot()
 {
     if(DbgCmdExecDirect(QString("graph %1").arg(ToPtrString(mGetSelection()))))
         GuiFocusView(GUI_GRAPH);
+}
+
+void CommonActions::displayTypeSlot()
+{
+    DisplayTypeDialog::pickType(widgetparent(), mGetSelection());
 }
 
 void CommonActions::setNewOriginHereActionSlot()

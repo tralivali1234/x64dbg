@@ -1,8 +1,8 @@
 #pragma once
 
 #include <zydis_wrapper.h>
-#include "RichTextPainter.h"
-#include "Configuration.h"
+#include <Utils/RichTextPainter.h>
+#include <Configuration.h>
 #include <map>
 #include <QHash>
 #include <QtCore>
@@ -35,6 +35,7 @@ public:
         //values
         Address, //jump/call destinations or displacements inside memory
         Value,
+        TraceNewValue,
         //memory
         MemorySize,
         MemorySegment,
@@ -111,6 +112,14 @@ public:
     {
         std::vector<SingleToken> tokens; //list of tokens that form the instruction
         int x = 0; //x of the first character
+
+        QString toString() const
+        {
+            QString text;
+            for(const auto & token : tokens)
+                text += token.text;
+            return text;
+        }
     };
 
     struct TokenColor
@@ -152,7 +161,7 @@ public:
     bool TokenizeData(const QString & datatype, const QString & data, InstructionToken & instruction);
     void UpdateConfig();
     void UpdateArchitecture();
-    void SetConfig(bool bUppercase, bool bTabbedMnemonic, bool bArgumentSpaces, bool bHidePointerSizes, bool bHideNormalSegments, bool bMemorySpaces, bool bNoHighlightOperands, bool bNoCurrentModuleText, bool b0xPrefixValues);
+    void SetConfig(bool bUppercase, bool bTabbedMnemonic, bool bArgumentSpaces, bool bHidePointerSizes, bool bHideNormalSegments, bool bMemorySpaces, bool bNoHighlightOperands, bool bNoCurrentModuleText, DisasmValueNotationType ValueNotation);
     int Size() const;
     const Zydis & GetZydis() const;
 
@@ -187,7 +196,7 @@ private:
     bool mMemorySpaces = false;
     bool mNoHighlightOperands = false;
     bool mNoCurrentModuleText = false;
-    bool m0xPrefixValues = false;
+    DisasmValueNotationType mValueNotation = DisasmValueNotationNone;
 
     void addToken(TokenType type, QString text, const TokenValue & value);
     void addToken(TokenType type, const QString & text);

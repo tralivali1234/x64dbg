@@ -2,6 +2,8 @@
 #include "ui_WordEditDialog.h"
 #include "ValidateExpressionThread.h"
 #include "StringUtil.h"
+#include <cinttypes>
+#include <QRegularExpressionValidator>
 #include <Configuration.h>
 
 WordEditDialog::WordEditDialog(QWidget* parent)
@@ -10,15 +12,16 @@ WordEditDialog::WordEditDialog(QWidget* parent)
       mHexLineEditPos(0),
       mSignedEditPos(0),
       mUnsignedEditPos(0),
-      mAsciiLineEditPos(0)
+      mAsciiLineEditPos(0),
+      hexValidate(this)
 {
     ui->setupUi(this);
     setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint | Qt::MSWindowsFixedSizeDialogHint);
     setModal(true);
 
     // Set up default validators for numerical input
-    ui->signedLineEdit->setValidator(new QRegExpValidator(QRegExp("^-?\\d*(\\d+)?$"), this));// Optional negative, 0-9
-    ui->unsignedLineEdit->setValidator(new QRegExpValidator(QRegExp("^\\d*(\\d+)?$"), this));// No signs, 0-9
+    ui->signedLineEdit->setValidator(new QRegularExpressionValidator(QRegularExpression("^-?\\d*(\\d+)?$"), this));// Optional negative, 0-9
+    ui->unsignedLineEdit->setValidator(new QRegularExpressionValidator(QRegularExpression("^\\d*(\\d+)?$"), this));// No signs, 0-9
 
     mValidateThread = new ValidateExpressionThread(this);
     mValidateThread->setOnExpressionChangedCallback(std::bind(&WordEditDialog::validateExpression, this, std::placeholders::_1));
@@ -62,7 +65,8 @@ void WordEditDialog::setup(QString title, duint defVal, int byteCount)
 {
     this->setWindowTitle(title);
     this->byteCount = byteCount;
-    ui->hexLineEdit->setInputMask(QString("hh").repeated(byteCount));
+    ui->hexLineEdit->setValidator(&hexValidate);
+    ui->hexLineEdit->setMaxLength(byteCount * 2);
     ui->expressionLineEdit->setText(QString("%1").arg(defVal, byteCount * 2, 16, QChar('0')).toUpper());
 
     ui->expressionLineEdit->selectAll();
@@ -88,29 +92,33 @@ void WordEditDialog::expressionChanged(bool validExpression, bool validPointer, 
         unsigned char* word = (unsigned char*)&mWord;
         // ascii
         int asciiWidth = 0;
-#ifdef _WIN64
-        hex[0] = word[7];
-        hex[1] = word[6];
-        hex[2] = word[5];
-        hex[3] = word[4];
-        hex[4] = word[3];
-        hex[5] = word[2];
-        hex[6] = word[1];
-        hex[7] = word[0];
-        asciiWidth = 8;
-#else //x86
-        hex[0] = word[3];
-        hex[1] = word[2];
-        hex[2] = word[1];
-        hex[3] = word[0];
-        asciiWidth = 4;
-#endif //_WIN64
+        if constexpr(sizeof(duint) == 8)
+        {
+            hex[0] = word[7];
+            hex[1] = word[6];
+            hex[2] = word[5];
+            hex[3] = word[4];
+            hex[4] = word[3];
+            hex[5] = word[2];
+            hex[6] = word[1];
+            hex[7] = word[0];
+            asciiWidth = 8;
+        }
+        else
+        {
+            hex[0] = word[3];
+            hex[1] = word[2];
+            hex[2] = word[1];
+            hex[3] = word[0];
+            asciiWidth = 4;
+        }
 
         // Save the original index for inputs
         saveCursorPositions();
 
         // Byte edit line
-        ui->hexLineEdit->setText(ToPtrString(hexWord));
+        if(!ui->hexLineEdit->hasFocus())
+            ui->hexLineEdit->setText(ToPtrString(hexWord));
         // Signed edit
         if(byteCount == sizeof(signed char))
             ui->signedLineEdit->setText(QString::number((signed char)mWord));
@@ -153,8 +161,8 @@ void WordEditDialog::expressionChanged(bool validExpression, bool validPointer, 
 
 void WordEditDialog::on_signedLineEdit_textEdited(const QString & arg1)
 {
-    LONGLONG value;
-    if(sscanf_s(arg1.toUtf8().constData(), "%lld", &value) == 1)
+    int64_t value;
+    if(sscanf(arg1.toUtf8().constData(), "%" SCNd64, &value) == 1)
     {
         ui->signedLineEdit->setStyleSheet("");
         ui->btnOk->setEnabled(true);
@@ -169,8 +177,8 @@ void WordEditDialog::on_signedLineEdit_textEdited(const QString & arg1)
 
 void WordEditDialog::on_unsignedLineEdit_textEdited(const QString & arg1)
 {
-    LONGLONG value;
-    if(sscanf_s(arg1.toUtf8().constData(), "%llu", &value) == 1)
+    uint64_t value;
+    if(sscanf(arg1.toUtf8().constData(), "%" SCNu64, &value) == 1)
     {
         ui->unsignedLineEdit->setStyleSheet("");
         ui->btnOk->setEnabled(true);
@@ -181,6 +189,32 @@ void WordEditDialog::on_unsignedLineEdit_textEdited(const QString & arg1)
         ui->unsignedLineEdit->setStyleSheet("border: 1px solid red");
         ui->btnOk->setEnabled(false);
     }
+}
+
+void WordEditDialog::on_hexLineEdit_textEdited(const QString & arg1)
+{
+    QString text = arg1;
+    duint value = 0;
+
+    for(int i = 0; i < text.length(); i += 2)
+    {
+        QString byteStr = text.mid(i, 2);
+        bool byteOk;
+        uint byteVal = byteStr.toUInt(&byteOk, 16);
+        if(!byteOk)
+        {
+            // Should never happen due to validator.
+            break;
+        }
+
+        // Little Endian: first byte is LSB
+        if(i / 2 < byteCount)
+        {
+            value |= ((duint)byteVal << ((i / 2) * 8));
+        }
+    }
+
+    ui->expressionLineEdit->setText(convertValueToHexString(value));
 }
 
 QString WordEditDialog::convertValueToHexString(duint value)

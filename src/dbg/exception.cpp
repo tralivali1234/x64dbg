@@ -38,6 +38,7 @@ static bool UniversalCodeInit(const String & file, std::unordered_map<unsigned i
             result = false;
             break;
         }
+        // TODO: Detect invalid constant names that is indistinguishable from numbers (deadbeef)
         names.insert({ (unsigned int)code, split[1] });
     }
     return result;
@@ -198,49 +199,41 @@ bool SyscallInit()
         char szModulePath[MAX_PATH];
         if(!GetModuleFileNameA(moduleHandle, szModulePath, _countof(szModulePath)))
             return false;
-        if(!ModLoad((duint)moduleHandle, 1, szModulePath, false))
+        auto info = MODINFO::load(0, 1, szModulePath, false, nullptr, false);
+        if(!info)
             return false;
-        auto info = ModInfoFromAddr((duint)moduleHandle);
-        if(info)
+        for(const MODEXPORT & exportEntry : info->exports)
         {
-            for(const MODEXPORT & exportEntry : info->exports)
+            if(strncmp(exportEntry.name.c_str(), "Nt", 2) != 0)
+                continue;
+            auto exportData = (const unsigned char*)ModRvaToOffset(info->fileMapVA, info->headers, info->loadedSize, exportEntry.rva);
+            if(!exportData)
+                continue;
+            // https://github.com/mrexodia/TitanHide/blob/1c6ba9796e320f399f998b23fba2729122597e87/TitanHide/ntdll.cpp#L75
+            DWORD index = -1;
+            for(int i = 0; i < 32; i++)
             {
-                if(strncmp(exportEntry.name.c_str(), "Nt", 2) != 0)
-                    continue;
-                auto exportData = (const unsigned char*)ModRvaToOffset(info->fileMapVA, info->headers, exportEntry.rva);
-                if(!exportData)
-                    continue;
-                // https://github.com/mrexodia/TitanHide/blob/1c6ba9796e320f399f998b23fba2729122597e87/TitanHide/ntdll.cpp#L75
-                DWORD index = -1;
-                for(int i = 0; i < 32; i++)
+                if(exportData[i] == 0xC2 || exportData[i] == 0xC3)   //RET
                 {
-                    if(exportData[i] == 0xC2 || exportData[i] == 0xC3)   //RET
-                    {
-                        break;
-                    }
-                    if(exportData[i] == 0xB8)   //mov eax,X
-                    {
-                        index = *(DWORD*)(exportData + i + 1);
-                        break;
-                    }
+                    break;
                 }
-                if(index != -1)
-                    SyscallIndices.emplace(index, exportEntry.name);
+                if(exportData[i] == 0xB8)   //mov eax,X
+                {
+                    index = *(DWORD*)(exportData + i + 1);
+                    break;
+                }
             }
-        }
-        else
-        {
-            return false;
+            if(index != -1)
+                SyscallIndices.emplace(index, exportEntry.name);
         }
         return true;
     };
 
     // See: https://github.com/x64dbg/ScyllaHide/blob/6817d32581b7a420322f34e36b1a1c8c3e4b434c/Scylla/Win32kSyscalls.h
     auto result = retrieveSyscalls("ntdll.dll");
-    OSVERSIONINFOW versionInfo = { sizeof(OSVERSIONINFOW) };
-    GetVersionExW(&versionInfo);
+    auto buildNumber = BridgeGetNtBuildNumber();
 
-    if(versionInfo.dwBuildNumber >= 14393)
+    if(buildNumber >= 14393)
     {
         result = result && retrieveSyscalls("win32u.dll");
     }
@@ -249,7 +242,7 @@ bool SyscallInit()
         SyscallIndices.reserve(sizeof(Win32kSyscalls) / sizeof(Win32kSyscalls[0]));
         for(auto & syscall : Win32kSyscalls)
         {
-            auto index = syscall.GetSyscallIndex((USHORT)versionInfo.dwBuildNumber, ArchValue(true, false));
+            auto index = syscall.GetSyscallIndex((USHORT)buildNumber, ArchValue(true, false));
             if(index != -1)
                 SyscallIndices.insert({ index, syscall.Name });
         }
@@ -271,9 +264,6 @@ bool SyscallInit()
             SyscallIndices.emplace(truncated, itr.second);
         }
     }
-
-    // Clear the GUI
-    ModClear(true);
 
     return result;
 }

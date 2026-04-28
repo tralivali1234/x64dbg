@@ -397,7 +397,7 @@ bool cbDebugSetHardwareBreakpoint(int argc, char* argv[])
     duint addr;
     if(!valfromstring(argv[1], &addr))
         return false;
-    DWORD type = UE_HARDWARE_EXECUTE;
+    TitanHardwareBreakpointType type = UE_HARDWARE_EXECUTE;
     if(argc > 2)
     {
         switch(*argv[2])
@@ -415,7 +415,7 @@ bool cbDebugSetHardwareBreakpoint(int argc, char* argv[])
             break;
         }
     }
-    DWORD titsize = UE_HARDWARE_SIZE_1;
+    TitanHardwareBreakpointSize titsize = UE_HARDWARE_SIZE_1;
     if(argc > 3)
     {
         duint size;
@@ -634,8 +634,9 @@ static bool cbDeleteAllMemoryBreakpoints(const BREAKPOINT* bp)
 {
     if(bp->type != BPMEMORY)
         return true;
-    duint size;
-    MemFindBaseAddr(bp->addr, &size);
+    auto size = bp->memsize;
+    if(size == 0)
+        MemFindBaseAddr(bp->addr, &size);
     if(!BpDelete(*bp))
     {
         dprintf(QT_TRANSLATE_NOOP("DBG", "Delete memory breakpoint failed (BpDelete): %p\n"), bp->addr);
@@ -653,14 +654,15 @@ static bool cbEnableAllMemoryBreakpoints(const BREAKPOINT* bp)
 {
     if(bp->type != BPMEMORY || bp->enabled)
         return true;
-    duint size = 0;
-    MemFindBaseAddr(bp->addr, &size);
+    auto size = bp->memsize;
+    if(size == 0)
+        MemFindBaseAddr(bp->addr, &size);
     if(!BpEnable(bp->addr, BPMEMORY, true))
     {
         dprintf(QT_TRANSLATE_NOOP("DBG", "Could not enable memory breakpoint %p (BpEnable)\n"), bp->addr);
         return false;
     }
-    if(!SetMemoryBPXEx(bp->addr, size, bp->titantype, !bp->singleshoot, cbMemoryBreakpoint))
+    if(!SetMemoryBPXEx(bp->addr, size, (TitanMemoryBreakpointType)bp->titantype, !bp->singleshoot, cbMemoryBreakpoint))
     {
         dprintf(QT_TRANSLATE_NOOP("DBG", "Could not enable memory breakpoint %p (SetMemoryBPXEx)\n"), bp->addr);
         return false;
@@ -705,7 +707,7 @@ bool cbDebugSetMemoryBpx(int argc, char* argv[])
         else
             strcpy_s(arg3, argv[2]);
     }
-    DWORD type = UE_MEMORY;
+    TitanMemoryBreakpointType type = UE_MEMORY;
     if(*arg3)
     {
         switch(*arg3)
@@ -727,6 +729,7 @@ bool cbDebugSetMemoryBpx(int argc, char* argv[])
             break;
         }
     }
+
     duint size = 0;
     duint base = MemFindBaseAddr(addr, &size, true);
     bool singleshoot = false;
@@ -736,7 +739,7 @@ bool cbDebugSetMemoryBpx(int argc, char* argv[])
     if(BpGet(base, BPMEMORY, 0, &bp))
     {
         if(!bp.enabled)
-            return BpEnable(base, BPMEMORY, true);
+            return DbgCmdExecDirect(StringUtils::sprintf("bpme %p", bp.addr).c_str());
         dputs(QT_TRANSLATE_NOOP("DBG", "Memory breakpoint already set!"));
         return true;
     }
@@ -750,7 +753,68 @@ bool cbDebugSetMemoryBpx(int argc, char* argv[])
         dputs(QT_TRANSLATE_NOOP("DBG", "Error setting memory breakpoint! (SetMemoryBPXEx)"));
         return false;
     }
-    dprintf(QT_TRANSLATE_NOOP("DBG", "Memory breakpoint at %p set!\n"), addr);
+    dprintf(QT_TRANSLATE_NOOP("DBG", "Memory breakpoint at %p[%p] set!\n"), base, size);
+    GuiUpdateAllViews();
+    return true;
+}
+
+bool cbDebugSetMemoryRangeBpx(int argc, char* argv[])
+{
+    if(IsArgumentsLessThan(argc, 3))
+        return false;
+
+    duint start = 0;
+    if(!valfromstring(argv[1], &start, false))
+        return false;
+
+    duint size = 0;
+    if(!valfromstring(argv[2], &size, false))
+        return false;
+
+    TitanMemoryBreakpointType type = UE_MEMORY;
+    bool singleshot = false;
+    if(argc > 3)
+    {
+        switch(argv[3][0])
+        {
+        case 'a': //read+write+execute
+            type = UE_MEMORY;
+            break;
+        case 'r': //read
+            type = UE_MEMORY_READ;
+            break;
+        case 'w': //write
+            type = UE_MEMORY_WRITE;
+            break;
+        case 'x': //execute
+            type = UE_MEMORY_EXECUTE;
+            break;
+        default:
+            dputs(QT_TRANSLATE_NOOP("DBG", "Invalid type specified!"));
+            return false;
+        }
+        singleshot = strstr(argv[3], "ss") != nullptr;
+    }
+
+    BREAKPOINT bp;
+    if(BpGet(start, BPMEMORY, 0, &bp))
+    {
+        if(!bp.enabled)
+            return DbgCmdExecDirect(StringUtils::sprintf("bpme %p", bp.addr).c_str());
+        dputs(QT_TRANSLATE_NOOP("DBG", "Memory breakpoint already set!"));
+        return true;
+    }
+    if(!BpNew(start, true, singleshot, 0, BPMEMORY, type, 0, size))
+    {
+        dputs(QT_TRANSLATE_NOOP("DBG", "Error setting memory breakpoint! (BpNew)"));
+        return false;
+    }
+    if(!SetMemoryBPXEx(start, size, type, !singleshot, cbMemoryBreakpoint))
+    {
+        dputs(QT_TRANSLATE_NOOP("DBG", "Error setting memory breakpoint! (SetMemoryBPXEx)"));
+        return false;
+    }
+    dprintf(QT_TRANSLATE_NOOP("DBG", "Memory breakpoint at %p[%p] set!\n"), start, size);
     GuiUpdateAllViews();
     return true;
 }
@@ -773,8 +837,9 @@ bool cbDebugDeleteMemoryBreakpoint(int argc, char* argv[])
     BREAKPOINT found;
     if(BpGet(0, BPMEMORY, argv[1], &found)) //found a breakpoint with name
     {
-        duint size;
-        MemFindBaseAddr(found.addr, &size);
+        auto size = found.memsize;
+        if(size == 0)
+            MemFindBaseAddr(found.addr, &size);
         if(!BpDelete(found.addr, BPMEMORY))
         {
             dprintf(QT_TRANSLATE_NOOP("DBG", "Delete memory breakpoint failed: %p (BpDelete)\n"), found.addr);
@@ -794,8 +859,9 @@ bool cbDebugDeleteMemoryBreakpoint(int argc, char* argv[])
         dprintf(QT_TRANSLATE_NOOP("DBG", "No such memory breakpoint \"%s\"\n"), argv[1]);
         return false;
     }
-    duint size;
-    MemFindBaseAddr(found.addr, &size);
+    auto size = found.memsize;
+    if(size == 0)
+        MemFindBaseAddr(found.addr, &size);
     if(!BpDelete(found.addr, BPMEMORY))
     {
         dprintf(QT_TRANSLATE_NOOP("DBG", "Delete memory breakpoint failed: %p (BpDelete)\n"), found.addr);
@@ -839,9 +905,10 @@ bool cbDebugEnableMemoryBreakpoint(int argc, char* argv[])
         GuiUpdateAllViews();
         return true;
     }
-    duint size = 0;
-    MemFindBaseAddr(found.addr, &size);
-    if(!SetMemoryBPXEx(found.addr, size, found.titantype, !found.singleshoot, cbMemoryBreakpoint))
+    auto size = found.memsize;
+    if(size == 0)
+        MemFindBaseAddr(found.addr, &size);
+    if(!SetMemoryBPXEx(found.addr, size, (TitanMemoryBreakpointType)found.titantype, !found.singleshoot, cbMemoryBreakpoint))
     {
         dprintf(QT_TRANSLATE_NOOP("DBG", "Could not enable memory breakpoint %p (SetMemoryBPXEx)\n"), found.addr);
         return false;
@@ -883,8 +950,9 @@ bool cbDebugDisableMemoryBreakpoint(int argc, char* argv[])
         dputs(QT_TRANSLATE_NOOP("DBG", "Memory breakpoint already disabled!"));
         return true;
     }
-    duint size = 0;
-    MemFindBaseAddr(found.addr, &size);
+    auto size = found.memsize;
+    if(size == 0)
+        MemFindBaseAddr(found.addr, &size);
     if(!RemoveMemoryBPX(found.addr, size))
     {
         dprintf(QT_TRANSLATE_NOOP("DBG", "Could not disable memory breakpoint %p (RemoveMemoryBPX)\n"), found.addr);
@@ -1433,7 +1501,7 @@ bool cbDebugSetBPXOptions(int argc, char* argv[])
 {
     if(IsArgumentsLessThan(argc, 2))
         return false;
-    DWORD type = 0;
+    TitanBreakpointType type;
     const char* strType = 0;
     duint setting_type;
     if(strstr(argv[1], "long"))

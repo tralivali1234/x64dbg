@@ -1,5 +1,5 @@
-#include "cmd-debug-control.h"
 #include "ntdll/ntdll.h"
+#include "cmd-debug-control.h"
 #include "console.h"
 #include "debugger.h"
 #include "animate.h"
@@ -125,7 +125,9 @@ bool cbDebugInit(int argc, char* argv[])
     dprintf(QT_TRANSLATE_NOOP("DBG", "Debugging: %s\n"), arg1);
     hFile.Close();
 
-    auto arch = GetPeArch(arg1w.c_str());
+    uint32_t entryPointRva = 0;
+    bool isDll = false;
+    auto arch = GetPeArch(arg1w.c_str(), &entryPointRva, &isDll);
 
     // Translate Any CPU to the actual architecture
     if(arch == PeArch::DotnetAnyCpu)
@@ -168,6 +170,8 @@ bool cbDebugInit(int argc, char* argv[])
     init.exe = arg1;
     init.commandline = arg2;
     init.currentfolder = currentfolder;
+    init.entryPointRva = entryPointRva;
+    init.isDll = isDll;
 
     dbgcreatedebugthread(&init);
     return true;
@@ -222,6 +226,7 @@ bool cbDebugStop(int argc, char* argv[])
                     DbSave(DbLoadSaveType::All);
                     TerminateThread(hDebugLoopThreadCopy, 1); // TODO: this will lose state and cause possible corruption if a critical section is still owned
                     CloseHandle(hDebugLoopThreadCopy);
+                    bIsDebugging = false;
                     return false;
                 }
             }
@@ -247,7 +252,24 @@ bool cbDebugAttach(int argc, char* argv[])
         return false;
 
     EXCLUSIVE_ACQUIRE(LockDebugStartStop);
-    cbDebugStop(argc, argv);
+
+    // Detach instead of terminate when attaching to a new process (if setting enabled)
+    if(bIsDebugging && settingboolget("Engine", "DetachOnAttach", false))
+    {
+        cbDebugDetach(argc, argv);
+
+        if(hDebugLoopThread)
+        {
+            WaitForSingleObject(hDebugLoopThread, INFINITE);
+            CloseHandle(hDebugLoopThread);
+            hDebugLoopThread = nullptr;
+        }
+    }
+    else
+    {
+        cbDebugStop(argc, argv);
+    }
+
     ASSERT_TRUE(hDebugLoopThread == nullptr);
 
     Handle hProcess = TitanOpenProcess(PROCESS_ALL_ACCESS, false, (DWORD)pid);
@@ -337,6 +359,7 @@ bool cbDebugDetach(int argc, char* argv[])
         dputs(QT_TRANSLATE_NOOP("DBG", "Detached!"));
     _dbg_animatestop(); // Stop animating
     unlock(WAITID_RUN); // run to resume the debug loop if necessary
+    HistoryClear();
     return true;
 }
 
@@ -391,6 +414,7 @@ bool cbDebugPause(int argc, char* argv[])
         dputs(QT_TRANSLATE_NOOP("DBG", "Program is not running"));
         return false;
     }
+    // TODO: get suspend count instead, this can be detected
     // Interesting behavior found by JustMagic, if the active thread is suspended pause would fail
     auto previousSuspendCount = SuspendThread(hActiveThread);
     if(previousSuspendCount != 0)
@@ -415,7 +439,7 @@ bool cbDebugPause(int argc, char* argv[])
     //WORKAROUND: If a program is stuck in NtUserGetMessage (GetMessage was called), this
     //will send a WM_NULL to stop the waiting. This only works if the message is not filtered.
     //OllyDbg also does this in a similar way.
-    PostThreadMessageA(ThreadGetId(hActiveThread), WM_NULL, 0, 0);
+    PostThreadMessageA(GetDebugData()->dwThreadId, WM_NULL, 0, 0);
     if(ResumeThread(hActiveThread) == -1)
     {
         dputs(QT_TRANSLATE_NOOP("DBG", "Error resuming thread"));
@@ -505,6 +529,8 @@ static bool IsRepeated(const Zydis & zydis)
     case ZYDIS_MNEMONIC_SCASD:
     case ZYDIS_MNEMONIC_SCASQ:
         return (zydis.GetInstr()->info.attributes & (ZYDIS_ATTRIB_HAS_REP | ZYDIS_ATTRIB_HAS_REPZ | ZYDIS_ATTRIB_HAS_REPNZ)) != 0;
+    default:
+        break;
     }
     return false;
 }

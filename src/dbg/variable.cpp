@@ -7,6 +7,7 @@
 #include "variable.h"
 #include "threading.h"
 #include <map>
+#include <algorithm>
 
 /**
 \brief The container that stores all variables.
@@ -185,7 +186,7 @@ bool varget(const char* Name, VAR_VALUE* Value, int* Size, VAR_TYPE* Type)
     auto found = variables.find(name_);
     if(found == variables.end()) //not found
         return false;
-    if(found->second.alias.length())
+    if(!found->second.alias.empty())
         return varget(found->second.alias.c_str(), Value, Size, Type);
     if(Type)
         *Type = found->second.type;
@@ -240,7 +241,7 @@ bool varget(const char* Name, char* String, int* Size, VAR_TYPE* Type)
     if(Type)
         *Type = vartype;
     if(String)
-        memcpy(String, varvalue.u.data->data(), Size ? min(*Size, varsize) : varsize);
+        memcpy(String, varvalue.u.data->data(), Size ? std::min(*Size, varsize) : varsize);
     return true;
 }
 
@@ -363,35 +364,15 @@ bool vargettype(const char* Name, VAR_TYPE* Type, VAR_VALUE_TYPE* ValueType)
     return true;
 }
 
-/**
-\brief Enumerates all variables.
-\param [in,out] List A pointer to place the variables in. If null, \p cbsize will be filled to the number of bytes required.
-\param [in,out] Size This function retrieves the number of bytes required to store all variables. Can be null if \p entries is not null.
-\return true if it succeeds, false if it fails.
-*/
-bool varenum(VAR* List, size_t* Size)
+std::vector<VAR> varenum()
 {
-    // A list or size must be requested
-    if(!List && !Size)
-        return false;
-
     SHARED_ACQUIRE(LockVariables);
 
-    if(Size)
+    std::vector<VAR> vars;
+    vars.reserve(variables.size());
+    for(const auto & itr : variables)
     {
-        // Size requested, so return it
-        *Size = variables.size() * sizeof(VAR);
-
-        if(!List)
-            return true;
+        vars.push_back(itr.second);
     }
-
-    // Fill out all list entries
-    for(auto & itr : variables)
-    {
-        *List = VAR(itr.second);
-        List++;
-    }
-
-    return true;
+    return vars;
 }

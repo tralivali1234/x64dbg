@@ -27,6 +27,8 @@ CPUArgumentWidget::CPUArgumentWidget(Architecture* architecture, QWidget* parent
     connect(mFollowStack, SIGNAL(triggered()), this, SLOT(followStackSlot()));
     mFollowAddrStack = new QAction(this);
     connect(mFollowAddrStack, SIGNAL(triggered()), this, SLOT(followStackSlot()));
+    mCopyClipboard = new QAction(this);
+    connect(mCopyClipboard, SIGNAL(triggered()), this, SLOT(onCopyToClipboardAction()));
 
     connect(Bridge::getBridge(), SIGNAL(repaintTableView()), this, SLOT(refreshData()));
     connect(Bridge::getBridge(), SIGNAL(disassembleAt(duint, duint)), this, SLOT(disassembleAtSlot(duint, duint)));
@@ -63,16 +65,6 @@ void CPUArgumentWidget::disassembleAtSlot(duint addr, duint cip)
     }
 }
 
-static QString stringFormatInline(const QString & format)
-{
-    if(!DbgFunctions()->StringFormatInline)
-        return QString();
-    char result[MAX_SETTING_SIZE] = "";
-    if(DbgFunctions()->StringFormatInline(format.toUtf8().constData(), MAX_SETTING_SIZE, result))
-        return result;
-    return CPUArgumentWidget::tr("[Formatting Error]");
-}
-
 void CPUArgumentWidget::refreshData()
 {
     if(!mAllowUpdate) //view is locked
@@ -95,7 +87,7 @@ void CPUArgumentWidget::refreshData()
     for(int i = 0; i < argCount; i++)
     {
         const auto & curArg = cur.arguments[i];
-        auto data = stringFormatInline(curArg.getFormat());
+        auto data = StringFormatInline(curArg.getFormat());
         auto text = defaultArgFieldFormat(defaultArgName(curArg.name, i + 1), data);
         mArgumentValues.push_back(DbgValFromString(curArg.getExpression().toUtf8().constData()));
         mTable->setCellContent(i, 0, text);
@@ -108,7 +100,7 @@ void CPUArgumentWidget::refreshData()
         QString expr = argOffset ? QString("%1+%2").arg(stackLocation).arg(ToHexString(argOffset)) : stackLocation;
 
         QString format = defaultArgFormat("", QString("[%1]").arg(expr));
-        auto data = stringFormatInline(format);
+        auto data = StringFormatInline(format);
         auto text = defaultArgFieldFormat(defaultArgName("", argCount + i + 1), data);
         mArgumentValues.push_back(DbgValFromString(expr.toUtf8().constData()));
         mTable->setCellContent(argCount + i, 0, text);
@@ -161,14 +153,22 @@ void CPUArgumentWidget::contextMenuSlot(QPoint pos)
                 configAction(menu, DIcon("stack"), mFollowAddrStack, valueAddrText, tr("Stack"));
         }
     }
+
     QMenu copyMenu(tr("&Copy"));
     copyMenu.setIcon(DIcon("copy"));
     mTable->setupCopyMenu(&copyMenu);
     if(copyMenu.actions().length())
     {
         menu.addSeparator();
+
+        mCopyClipboard->setText(tr("Copy Value"));
+        mCopyClipboard->setIcon(DIcon("copy"));
+        mCopyClipboard->setObjectName(ToHexString(value));
+        menu.addAction(mCopyClipboard);
+
         menu.addMenu(&copyMenu);
     }
+
     menu.exec(mTable->mapToGlobal(pos));
 }
 
@@ -194,6 +194,14 @@ void CPUArgumentWidget::followStackSlot()
     if(!action)
         return;
     DbgCmdExec(QString("sdump \"%1\"").arg(action->objectName()));
+}
+
+void CPUArgumentWidget::onCopyToClipboardAction()
+{
+    QAction* action = qobject_cast<QAction*>(sender());
+    if(!action)
+        return;
+    Bridge::CopyToClipboard(action->objectName());
 }
 
 void CPUArgumentWidget::loadConfig()
@@ -235,6 +243,7 @@ void CPUArgumentWidget::loadConfig()
 void CPUArgumentWidget::setupTable()
 {
     connect(mTable, SIGNAL(contextMenuSignal(QPoint)), this, SLOT(contextMenuSlot(QPoint)));
+    mTable->setAccessibleName(tr("Arguments"));
     mTable->enableMultiSelection(false);
     mTable->setShowHeader(false);
     mTable->addColumnAt(0, "", false);

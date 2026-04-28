@@ -23,16 +23,18 @@ public:
 
     void expandSelectionUpTo(duint to);
     void setSingleSelection(duint index);
-    duint getInitialSelection();
-    duint getSelectionSize();
-    duint getSelectionStart();
-    duint getSelectionEnd();
+    duint getInitialSelection() const;
+    duint getSelectionSize() const;
+    duint getSelectionStart() const;
+    duint getSelectionEnd() const;
 
     bool isFileOpened() const;
     TraceFileReader* getTraceFile() { return mTraceFile; }
 
     static bool isRecording();
     static bool toggleTraceRecording(QWidget* parent);
+
+    bool hightlightToken(const ZydisTokenizer::SingleToken & token);
 
 private:
     enum TableColumnIndex
@@ -47,7 +49,7 @@ private:
     };
     void setupRightClickContextMenu();
     void makeVisible(duint index);
-    QString getAddrText(dsint cur_addr, char label[MAX_LABEL_SIZE], bool getLabel);
+    QString getAddrText(dsint cur_addr, char label[MAX_LABEL_SIZE], bool getLabel) const;
     RichTextPainter::List getRichBytes(const Instruction_t & instr) const;
     void pushSelectionInto(bool copyBytes, QTextStream & stream, QTextStream* htmlStream = nullptr);
     void copySelectionSlot(bool copyBytes);
@@ -183,6 +185,7 @@ public slots:
 
     void searchConstantSlot();
     void searchMemRefSlot();
+    void searchCallsSlot();
 
     void updateSlot();
 
@@ -196,5 +199,7 @@ private:
     // Go to by address, display the Xref dialog if multiple indicies are found
     void disasmByAddress(duint address, bool history = true);
     TraceWidget* mParent;
+    friend class AccessibleTraceBrowser;
+    int accessibilitySelectedRow() const override;
 };
 

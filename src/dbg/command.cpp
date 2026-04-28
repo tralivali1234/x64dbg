@@ -11,6 +11,7 @@
 #include "expressionparser.h"
 #include "variable.h"
 #include "cmd-undocumented.h"
+#include "stringformat.h"
 
 COMMAND* cmd_list = 0;
 
@@ -53,7 +54,7 @@ bool IsArgumentsLessThan(int argc, int minimumCount)
 {
     if(argc < minimumCount)
     {
-        dprintf_html(QT_TRANSLATE_NOOP("DBG", "Not enough arguments! At least %d argument(s) must be specified. Arguments are <a href=\"https://help.x64dbg.com/en/latest/commands/index.html\">comma-separated</a>."), minimumCount - 1);
+        dprintf_html(QT_TRANSLATE_NOOP("DBG", "Not enough arguments! At least %d argument(s) must be specified. Arguments are <a href=\"https://help.x64dbg.com/en/latest/commands/index.html\">comma-separated</a>.\n"), minimumCount - 1);
         return true;
     }
     return false;
@@ -203,10 +204,19 @@ bool cmddel(const char* name)
     return true;
 }
 
-bool cbCommandProvider(char* cmd, int maxlen);
-
 void cmdsplit(const char* cmd, StringList & commands)
 {
+    // Allow prefixing commands with $ to format them
+    String cmdFormatted;
+    if(*cmd == '$')
+    {
+        cmd++;
+        while(*cmd == ' ')
+            cmd++;
+        cmdFormatted = stringformatinline(cmd);
+        cmd = cmdFormatted.c_str();
+    }
+
     commands.clear();
     auto len = strlen(cmd);
     auto inquote = false;
@@ -242,7 +252,7 @@ void cmdsplit(const char* cmd, StringList & commands)
         commands.push_back(split);
 }
 
-bool cmdexeccallback(COMMAND* cmd, const std::string & command)
+static bool cmdexeccallback(COMMAND* cmd, const std::string & command)
 {
     Command commandParsed(command);
     int argcount = commandParsed.GetArgCount();
@@ -260,6 +270,9 @@ bool cmdexeccallback(COMMAND* cmd, const std::string & command)
     efree(argv, "cmdloop:argv");
     return res;
 }
+
+// Defined in x64dbg.cpp
+bool cbCommandProvider(char* cmd, int maxlen);
 
 /**
 \brief Initiates the command loop. This function will not return until a command returns ::STATUS_EXIT.

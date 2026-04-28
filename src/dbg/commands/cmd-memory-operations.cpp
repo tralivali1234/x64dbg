@@ -7,6 +7,22 @@
 #include "value.h"
 #include "stringformat.h"
 #include "comment.h"
+#include <vector>
+
+static bool FillDebugMemory(duint addr, duint size, uint8_t value)
+{
+    if(size == 0)
+        return true;
+
+    std::vector<uint8_t> buffer(std::min<duint>(size, PAGE_SIZE), value);
+    for(duint offset = 0; offset < size; offset += buffer.size())
+    {
+        const auto chunkSize = std::min<duint>(duint(buffer.size()), size - offset);
+        if(!MemWrite(addr + offset, buffer.data(), chunkSize))
+            return false;
+    }
+    return true;
+}
 
 bool cbDebugAlloc(int argc, char* argv[])
 {
@@ -89,7 +105,7 @@ bool cbDebugMemset(int argc, char* argv[])
         size -= diff;
     }
     BYTE fi = value & 0xFF;
-    if(!Fill((void*)addr, size & 0xFFFFFFFF, &fi))
+    if(!FillDebugMemory(addr, size & 0xFFFFFFFF, fi))
         dputs(QT_TRANSLATE_NOOP("DBG", "Memset failed"));
     else
         dprintf(QT_TRANSLATE_NOOP("DBG", "Memory %p (size: %.8X) set to %.2X\n"), addr, DWORD(size & 0xFFFFFFFF), BYTE(value & 0xFF));
@@ -111,7 +127,7 @@ bool cbDebugMemcpy(int argc, char* argv[])
     for(size_t i = 0; i < size; i += buffer.size())
     {
         duint NumberOfBytesRead = 0;
-        auto readOk = MemRead(src + i, buffer.data(), min(buffer.size(), size - i), &NumberOfBytesRead);
+        auto readOk = MemRead(src + i, buffer.data(), std::min(buffer.size(), (size_t)(size - i)), &NumberOfBytesRead);
         duint NumberOfBytesWritten = 0;
         auto writeOk = MemWrite(dst + i, buffer.data(), NumberOfBytesRead, &NumberOfBytesWritten);
         totalNumberOfBytesWritten += NumberOfBytesWritten;
@@ -216,6 +232,9 @@ bool cbInstrMinidump(int argc, char* argv[])
     if(IsArgumentsLessThan(argc, 2))
         return false;
 
+    // TODO: allow this with all threads suspended
+    // TODO: add an option to only dump modules
+    // TODO: add to the context menu
     if(DbgIsRunning())
     {
         dputs(QT_TRANSLATE_NOOP("DBG", "Cannot dump while running..."));

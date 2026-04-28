@@ -16,9 +16,9 @@ public:
     CPUDisassembly(Architecture* architecture, bool isMain, QWidget* parent = nullptr);
 
     // Mouse management
-    void contextMenuEvent(QContextMenuEvent* event);
-    void mousePressEvent(QMouseEvent* event);
-    void mouseDoubleClickEvent(QMouseEvent* event);
+    void contextMenuEvent(QContextMenuEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
 
     // Context menu management
     void setupRightClickContextMenu();
@@ -91,6 +91,7 @@ public slots:
     void traceCoverageBitSlot();
     void traceCoverageByteSlot();
     void traceCoverageWordSlot();
+    void traceCoverageResetSlot();
     void traceCoverageDisableSlot();
     void traceCoverageToggleTraceRecordingSlot();
     void displayWarningSlot(QString title, QString text);

@@ -1,7 +1,6 @@
 #include "SettingsDialog.h"
 #include "ui_SettingsDialog.h"
 #include <QMessageBox>
-#include "Configuration.h"
 #include "Bridge.h"
 #include "ExceptionRangeDialog.h"
 #include "MiscUtil.h"
@@ -127,6 +126,8 @@ void SettingsDialog::LoadSettings()
     GetSettingBool("Engine", "VerboseExceptionLogging", &settings.engineVerboseExceptionLogging);
     GetSettingBool("Engine", "NoWow64SingleStepWorkaround", &settings.engineNoWow64SingleStepWorkaround);
     GetSettingBool("Engine", "DisableAslr", &settings.engineDisableAslr);
+    GetSettingBool("Engine", "DetachOnAttach", &settings.engineDetachOnAttach);
+    GetSettingBool("Engine", "DetachOnExit", &settings.engineDetachOnExit);
     if(BridgeSettingGetUint("Engine", "MaxTraceCount", &cur))
         settings.engineMaxTraceCount = int(cur);
     if(BridgeSettingGetUint("Engine", "AnimateInterval", &cur))
@@ -147,6 +148,8 @@ void SettingsDialog::LoadSettings()
         break;
     case DebugEngineGleeBug:
         ui->radioGleeBug->setChecked(true);
+        break;
+    case DebugEngineStaticEngine:
         break;
     }
     switch(settings.engineBreakpointType)
@@ -173,6 +176,8 @@ void SettingsDialog::LoadSettings()
     ui->chkVerboseExceptionLogging->setChecked(settings.engineVerboseExceptionLogging);
     ui->chkNoWow64SingleStepWorkaround->setChecked(settings.engineNoWow64SingleStepWorkaround);
     ui->chkDisableAslr->setChecked(settings.engineDisableAslr);
+    ui->chkDetachOnAttach->setChecked(settings.engineDetachOnAttach);
+    ui->chkDetachOnExit->setChecked(settings.engineDetachOnExit);
     ui->spinMaxTraceCount->setValue(settings.engineMaxTraceCount);
     ui->spinAnimateInterval->setValue(settings.engineAnimateInterval);
 
@@ -235,12 +240,26 @@ void SettingsDialog::LoadSettings()
     GetSettingBool("Disassembler", "NoHighlightOperands", &settings.disasmNoHighlightOperands);
     GetSettingBool("Disassembler", "PermanentHighlightingMode", &settings.disasmPermanentHighlightingMode);
     GetSettingBool("Disassembler", "NoCurrentModuleText", &settings.disasmNoCurrentModuleText);
-    GetSettingBool("Disassembler", "0xPrefixValues", &settings.disasm0xPrefixValues);
     GetSettingBool("Disassembler", "NoBranchDisasmPreview", &settings.disasmNoBranchDisasmPreview);
     GetSettingBool("Disassembler", "NoSourceLineAutoComments", &settings.disasmNoSourceLineAutoComments);
     GetSettingBool("Disassembler", "AssembleOnDoubleClick", &settings.disasmAssembleOnDoubleClick);
+    GetSettingBool("Disassembler", "UseRunTrace", &settings.disasmUseRunTrace);
+
+    if(BridgeSettingGetUint("Disassembler", "0xPrefixValues", &cur))
+    {
+        switch(cur)
+        {
+        case DisasmValueNotationNone:
+        case DisasmValueNotationC:
+        case DisasmValueNotationMASM:
+            settings.disasmValueNotation = (DisasmValueNotationType)cur;
+            break;
+        }
+    }
+
     if(BridgeSettingGetUint("Disassembler", "MaxModuleSize", &cur))
         settings.disasmMaxModuleSize = int(cur);
+
     ui->chkArgumentSpaces->setChecked(settings.disasmArgumentSpaces);
     ui->chkHidePointerSizes->setChecked(settings.disasmHidePointerSizes);
     ui->chkHideNormalSegments->setChecked(settings.disasmHideNormalSegments);
@@ -251,11 +270,12 @@ void SettingsDialog::LoadSettings()
     ui->chkNoHighlightOperands->setChecked(settings.disasmNoHighlightOperands);
     ui->chkPermanentHighlightingMode->setChecked(settings.disasmPermanentHighlightingMode);
     ui->chkNoCurrentModuleText->setChecked(settings.disasmNoCurrentModuleText);
-    ui->chk0xPrefixValues->setChecked(settings.disasm0xPrefixValues);
+    ui->comboValueNotation->setCurrentIndex(settings.disasmValueNotation);
     ui->chkNoBranchDisasmPreview->setChecked(settings.disasmNoBranchDisasmPreview);
     ui->chkNoSourceLinesAutoComments->setChecked(settings.disasmNoSourceLineAutoComments);
     ui->chkDoubleClickAssemble->setChecked(settings.disasmAssembleOnDoubleClick);
     ui->spinMaximumModuleNameSize->setValue(settings.disasmMaxModuleSize);
+    ui->chkUseRunTrace->setChecked(settings.disasmUseRunTrace);
 
     //Gui tab
     GetSettingBool("Gui", "FpuRegistersLittleEndian", &settings.guiFpuRegistersLittleEndian);
@@ -267,6 +287,7 @@ void SettingsDialog::LoadSettings()
     GetSettingBool("Gui", "ShowGraphRva", &settings.guiShowGraphRva);
     GetSettingBool("Gui", "GraphZoomMode", &settings.guiGraphZoomMode);
     GetSettingBool("Gui", "ShowExitConfirmation", &settings.guiShowExitConfirmation);
+    GetSettingBool("Gui", "ShowAttachConfirmation", &settings.guiShowAttachConfirmation);
     GetSettingBool("Gui", "DisableAutoComplete", &settings.guiDisableAutoComplete);
     GetSettingBool("Gui", "AutoFollowInStack", &settings.guiAutoFollowInStack);
     GetSettingBool("Gui", "NoSeasons", &settings.guiHideSeasonalIcons);
@@ -283,6 +304,7 @@ void SettingsDialog::LoadSettings()
     ui->chkShowGraphRva->setChecked(settings.guiShowGraphRva);
     ui->chkGraphZoomMode->setChecked(settings.guiGraphZoomMode);
     ui->chkShowExitConfirmation->setChecked(settings.guiShowExitConfirmation);
+    ui->chkShowAttachConfirmation->setChecked(settings.guiShowAttachConfirmation);
     ui->chkDisableAutoComplete->setChecked(settings.guiDisableAutoComplete);
     ui->chkAutoFollowInStack->setChecked(settings.guiAutoFollowInStack);
     ui->chkHideSeasonalIcons->setChecked(settings.guiHideSeasonalIcons);
@@ -391,6 +413,8 @@ void SettingsDialog::SaveSettings()
     BridgeSettingSetUint("Engine", "HardcoreThreadSwitchWarning", settings.engineHardcoreThreadSwitchWarning);
     BridgeSettingSetUint("Engine", "NoWow64SingleStepWorkaround", settings.engineNoWow64SingleStepWorkaround);
     BridgeSettingSetUint("Engine", "DisableAslr", settings.engineDisableAslr);
+    BridgeSettingSetUint("Engine", "DetachOnAttach", settings.engineDetachOnAttach);
+    BridgeSettingSetUint("Engine", "DetachOnExit", settings.engineDetachOnExit);
 
     //Exceptions tab
     QString exceptionRange = "";
@@ -420,11 +444,12 @@ void SettingsDialog::SaveSettings()
     BridgeSettingSetUint("Disassembler", "NoHighlightOperands", settings.disasmNoHighlightOperands);
     BridgeSettingSetUint("Disassembler", "PermanentHighlightingMode", settings.disasmPermanentHighlightingMode);
     BridgeSettingSetUint("Disassembler", "NoCurrentModuleText", settings.disasmNoCurrentModuleText);
-    BridgeSettingSetUint("Disassembler", "0xPrefixValues", settings.disasm0xPrefixValues);
+    BridgeSettingSetUint("Disassembler", "0xPrefixValues", settings.disasmValueNotation);
     BridgeSettingSetUint("Disassembler", "NoBranchDisasmPreview", settings.disasmNoBranchDisasmPreview);
     BridgeSettingSetUint("Disassembler", "NoSourceLineAutoComments", settings.disasmNoSourceLineAutoComments);
     BridgeSettingSetUint("Disassembler", "AssembleOnDoubleClick", settings.disasmAssembleOnDoubleClick);
     BridgeSettingSetUint("Disassembler", "MaxModuleSize", settings.disasmMaxModuleSize);
+    BridgeSettingSetUint("Disassembler", "UseRunTrace", settings.disasmUseRunTrace);
 
     //Gui tab
     BridgeSettingSetUint("Gui", "FpuRegistersLittleEndian", settings.guiFpuRegistersLittleEndian);
@@ -436,6 +461,7 @@ void SettingsDialog::SaveSettings()
     BridgeSettingSetUint("Gui", "ShowGraphRva", settings.guiShowGraphRva);
     BridgeSettingSetUint("Gui", "GraphZoomMode", settings.guiGraphZoomMode);
     BridgeSettingSetUint("Gui", "ShowExitConfirmation", settings.guiShowExitConfirmation);
+    BridgeSettingSetUint("Gui", "ShowAttachConfirmation", settings.guiShowAttachConfirmation);
     BridgeSettingSetUint("Gui", "DisableAutoComplete", settings.guiDisableAutoComplete);
     BridgeSettingSetUint("Gui", "AutoFollowInStack", settings.guiAutoFollowInStack);
     BridgeSettingSetUint("Gui", "NoSeasons", settings.guiHideSeasonalIcons);
@@ -951,6 +977,11 @@ void SettingsDialog::on_chkUppercase_stateChanged(int arg1)
     settings.disasmUppercase = arg1 != Qt::Unchecked;
 }
 
+void SettingsDialog::on_chkUseRunTrace_toggled(bool checked)
+{
+    settings.disasmUseRunTrace = checked;
+}
+
 void SettingsDialog::on_chkOnlyCipAutoComments_stateChanged(int arg1)
 {
     settings.disasmOnlyCipAutoComments = arg1 != Qt::Unchecked;
@@ -1063,16 +1094,34 @@ void SettingsDialog::on_chkDisableAslr_toggled(bool checked)
     settings.engineDisableAslr = checked;
 }
 
+void SettingsDialog::on_chkDetachOnAttach_toggled(bool checked)
+{
+    settings.engineDetachOnAttach = checked;
+}
+
+void SettingsDialog::on_chkDetachOnExit_toggled(bool checked)
+{
+    settings.engineDetachOnExit = checked;
+}
+
 void SettingsDialog::on_chkNoCurrentModuleText_toggled(bool checked)
 {
     bTokenizerConfigUpdated = true;
     settings.disasmNoCurrentModuleText = checked;
 }
 
-void SettingsDialog::on_chk0xPrefixValues_toggled(bool checked)
+void SettingsDialog::on_comboValueNotation_currentIndexChanged(int index)
 {
     bTokenizerConfigUpdated = true;
-    settings.disasm0xPrefixValues = checked;
+
+    switch(index)
+    {
+    case DisasmValueNotationNone:
+    case DisasmValueNotationC:
+    case DisasmValueNotationMASM:
+        settings.disasmValueNotation = (DisasmValueNotationType)index;
+        break;
+    }
 }
 
 void SettingsDialog::on_chkNoBranchDisasmPreview_toggled(bool checked)
@@ -1111,6 +1160,11 @@ void SettingsDialog::on_chkGraphZoomMode_toggled(bool checked)
 void SettingsDialog::on_chkShowExitConfirmation_toggled(bool checked)
 {
     settings.guiShowExitConfirmation = checked;
+}
+
+void SettingsDialog::on_chkShowAttachConfirmation_toggled(bool checked)
+{
+    settings.guiShowAttachConfirmation = checked;
 }
 
 void SettingsDialog::on_chkDisableAutoComplete_toggled(bool checked)

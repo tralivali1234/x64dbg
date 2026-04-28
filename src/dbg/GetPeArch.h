@@ -14,7 +14,7 @@ enum class PeArch
 };
 
 // Thanks to blaquee for the investigative work!
-static PeArch GetPeArch(const wchar_t* szFileName)
+static PeArch GetPeArch(const wchar_t* szFileName, uint32_t* entryPointRva = nullptr, bool* fileIsDll = nullptr)
 {
     auto result = PeArch::Invalid;
     auto hFile = CreateFileW(szFileName, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
@@ -27,7 +27,9 @@ static PeArch GetPeArch(const wchar_t* szFileName)
             auto fileMap = MapViewOfFile(hMappedFile, FILE_MAP_READ, 0, 0, 0);
             if(fileMap)
             {
+#ifndef __GNUC__
                 __try
+#endif // __GNUC__
                 {
                     auto pidh = PIMAGE_DOS_HEADER(fileMap);
                     if(pidh->e_magic == IMAGE_DOS_SIGNATURE)
@@ -39,6 +41,8 @@ static PeArch GetPeArch(const wchar_t* szFileName)
                             if(Machine == IMAGE_FILE_MACHINE_I386 || Machine == IMAGE_FILE_MACHINE_AMD64)
                             {
                                 auto isDll = (pnth->FileHeader.Characteristics & IMAGE_FILE_DLL) == IMAGE_FILE_DLL;
+                                if(fileIsDll != nullptr)
+                                    *fileIsDll = isDll;
                                 auto isFile86 = Machine == IMAGE_FILE_MACHINE_I386;
 
                                 // Set the native architecture of the PE file (to still have something to show for if the COM directory is invalid).
@@ -51,12 +55,16 @@ static PeArch GetPeArch(const wchar_t* szFileName)
                                     auto pnth32 = PIMAGE_NT_HEADERS32(pnth);
                                     comAddr = pnth32->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR].VirtualAddress;
                                     comSize = pnth32->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR].Size;
+                                    if(entryPointRva != nullptr)
+                                        *entryPointRva = pnth32->OptionalHeader.AddressOfEntryPoint;
                                 }
                                 else // x64
                                 {
                                     auto pnth64 = PIMAGE_NT_HEADERS64(pnth);
                                     comAddr = pnth64->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR].VirtualAddress;
                                     comSize = pnth64->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR].Size;
+                                    if(entryPointRva != nullptr)
+                                        *entryPointRva = pnth64->OptionalHeader.AddressOfEntryPoint;
                                 }
 
                                 // Check if the file has a (valid) COM (.NET) directory.
@@ -97,9 +105,11 @@ static PeArch GetPeArch(const wchar_t* szFileName)
                         }
                     }
                 }
+#ifndef __GNUC__
                 __except(EXCEPTION_EXECUTE_HANDLER)
                 {
                 }
+#endif // __GNUC__
                 UnmapViewOfFile(fileMap);
             }
             CloseHandle(hMappedFile);

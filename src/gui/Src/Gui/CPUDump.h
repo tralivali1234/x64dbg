@@ -13,7 +13,7 @@ class CPUDump : public HexDump
     Q_OBJECT
 public:
     explicit CPUDump(CPUMultiDump* multiDump, CPUDisassembly* disasassembly, QWidget* parent = nullptr);
-    void getColumnRichText(duint col, duint rva, RichTextPainter::List & richText) override;
+    void getColumnRichText(duint col, duint rva, RichTextPainter::List & richText) const override;
     QString paintContent(QPainter* painter, duint row, duint col, int x, int y, int w, int h) override;
     void setupContextMenu();
     void getAttention();
@@ -52,6 +52,7 @@ public slots:
     void integerUnsignedShortSlot();
     void integerUnsignedLongSlot();
     void integerUnsignedLongLongSlot();
+    void integerHexByteSlot();
     void integerHexShortSlot();
     void integerHexLongSlot();
     void integerHexLongLongSlot();
@@ -59,6 +60,7 @@ public slots:
     void floatFloatSlot();
     void floatDoubleSlot();
     void floatLongDoubleSlot();
+    void floatHalfSlot();
 
     void addressUnicodeSlot();
     void addressAsciiSlot();
@@ -84,6 +86,12 @@ public slots:
 
     void headerButtonReleasedSlot(duint colIndex);
 
+    void cycleHexViewSlot();
+    void cycleTextViewSlot();
+    void cycleIntegerViewSlot();
+    void cycleFloatViewSlot();
+    void cycleAddressViewSlot();
+
 private:
     MenuBuilder* mMenuBuilder;
     CommonActions* mCommonActions;
@@ -94,6 +102,7 @@ private:
 
     GotoDialog* mGoto = nullptr;
     GotoDialog* mGotoOffset = nullptr;
+    GotoDialog* mGotoType = nullptr;
     CPUDisassembly* mDisassembly = nullptr;
     CPUMultiDump* mMultiDump = nullptr;
     int mAsciiSeparator = 0;
@@ -122,8 +131,11 @@ private:
         ViewAddressAscii,
         ViewAddressUnicode,
         ViewHexCodepage,
-        ViewTextCodepage
+        ViewTextCodepage,
+        ViewFloatHalf,
+        ViewIntegerHexByte,
     };
 
+    ViewEnum_t getCurrentView() const;
     void setView(ViewEnum_t view);
 };

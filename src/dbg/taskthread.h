@@ -6,7 +6,6 @@
 #include <thread>
 #include <tuple>
 #include <type_traits>
-#include <utility>
 
 const size_t TASK_THREAD_DEFAULT_SLEEP_TIME = 100;
 template <typename F, typename... Args>
@@ -64,7 +63,7 @@ template<class S1, class S2> struct concat;
 
 template<unsigned... I1, unsigned... I2>
 struct concat<seq<I1...>, seq<I2...>>
-                                   : seq < I1..., (sizeof...(I1) + I2)... > {};
+: seq < I1..., (sizeof...(I1) + I2)... > {};
 
 template<class S1, class S2> using Concat = Invoke<concat<S1, S2>>;
 
@@ -121,7 +120,7 @@ template <typename F, typename... Args> void TaskThread_<F, Args...>::Loop()
         if(this->active)
         {
             apply_from_tuple(this->fn, argLatch);
-            std::this_thread::sleep_for(std::chrono::milliseconds(this->minSleepTimeMs));
+            Sleep((DWORD)this->minSleepTimeMs);
             ++this->execs;
         }
     }

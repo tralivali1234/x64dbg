@@ -27,17 +27,18 @@ struct TranslatedStringStorage
 {
     char Data[4096];
 };
-extern std::map<DWORD, TranslatedStringStorage>* TLS_TranslatedStringMap;
+
+extern thread_local TranslatedStringStorage TLS_TranslatedString;
 
 #if QT_VERSION >= QT_VERSION_CHECK(5,0,0)
 class MyEventFilter : public QAbstractNativeEventFilter
 {
-public:
-    virtual bool nativeEventFilter(const QByteArray & eventType, void* message, long* result) Q_DECL_OVERRIDE
+protected:
+    bool nativeEventFilter(const QByteArray & eventType, void* message, long* result) override
     {
         if(eventType == "windows_dispatcher_MSG")
             return DbgWinEventGlobal((MSG*)message);
-        else if(eventType == "windows_generic_MSG")
+        if(eventType == "windows_generic_MSG")
             return DbgWinEvent((MSG*)message, result);
         return false;
     }

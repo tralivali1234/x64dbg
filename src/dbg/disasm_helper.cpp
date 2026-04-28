@@ -150,7 +150,7 @@ static void HandleZydisOperand(Zydis & zydis, int opindex, DISASM_ARG* arg, bool
         if(mem.segment == ArchValue(ZYDIS_REGISTER_FS, ZYDIS_REGISTER_GS))
         {
             arg->segment = ArchValue(SEG_FS, SEG_GS);
-            value += ThreadGetLocalBase(ThreadGetId(hActiveThread));
+            value += ThreadGetLocalBase(GetDebugData()->dwThreadId);
         }
         else
         {
@@ -173,6 +173,8 @@ static void HandleZydisOperand(Zydis & zydis, int opindex, DISASM_ARG* arg, bool
                 break;
             case ZYDIS_REGISTER_SS:
                 arg->segment = SEG_SS;
+                break;
+            default:
                 break;
             }
         }
@@ -416,10 +418,9 @@ extern "C" __declspec(dllexport) bool isunicodestring(const unsigned char* data,
 
 bool disasmispossiblestring(duint addr, STRING_TYPE* type)
 {
-    unsigned char data[60];
-    memset(data, 0, sizeof(data));
+    unsigned char data[60] = {};
     duint bytesRead = 0;
-    if(!MemReadUnsafe(addr, data, sizeof(data), &bytesRead) && bytesRead < 2)
+    if(!MemReadUnsafe(addr, data, sizeof(data) - 1, &bytesRead) && bytesRead < 2)
         return false;
     if(isasciistring(data, sizeof(data)))
     {
@@ -458,13 +459,13 @@ bool disasmgetstringat(duint addr, STRING_TYPE* type, char* ascii, char* unicode
 
         // Convert ANSI string to UTF-8
         std::string asciiData2 = StringUtils::LocalCpToUtf8((const char*)data());
-        memcpy(asciiData, asciiData2.c_str(), min((size_t(maxlen) + 1) * 2, asciiData2.size() + 1));
+        memcpy(asciiData, asciiData2.c_str(), std::min((size_t(maxlen) + 1) * 2, asciiData2.size() + 1));
 
         // Escape the string
         String escaped = StringUtils::Escape(asciiData);
 
         // Copy data back to outgoing parameter
-        strncpy_s(ascii, min(int(escaped.length()) + 1, maxlen), escaped.c_str(), _TRUNCATE);
+        strncpy_s(ascii, std::min(int(escaped.length()) + 1, maxlen), escaped.c_str(), _TRUNCATE);
         return true;
     }
 
@@ -475,13 +476,13 @@ bool disasmgetstringat(duint addr, STRING_TYPE* type, char* ascii, char* unicode
 
         // Convert UTF-16 string to UTF-8
         std::string asciiData2 = StringUtils::Utf16ToUtf8((const wchar_t*)data());
-        memcpy(asciiData, asciiData2.c_str(), min((size_t(maxlen) + 1) * 2, asciiData2.size() + 1));
+        memcpy(asciiData, asciiData2.c_str(), std::min((size_t(maxlen) + 1) * 2, asciiData2.size() + 1));
 
         // Escape the string
         String escaped = StringUtils::Escape(asciiData);
 
         // Copy data back to outgoing parameter
-        strncpy_s(unicode, min(int(escaped.length()) + 1, maxlen), escaped.c_str(), _TRUNCATE);
+        strncpy_s(unicode, std::min(int(escaped.length()) + 1, maxlen), escaped.c_str(), _TRUNCATE);
         return true;
     }
 
@@ -505,18 +506,21 @@ bool disasmgetstringatwrapper(duint addr, char* dest, bool cache)
     char string[MAX_STRING_SIZE];
     duint addrPtr = readValidPtr(addr);
     STRING_TYPE strtype;
-    auto possibleUnicode = disasmispossiblestring(addr, &strtype) && strtype == str_unicode;
-    if(addrPtr && !possibleUnicode)
+    if(addrPtr)
     {
-        if(disasmgetstringat(addrPtr, &strtype, string, string, MAX_STRING_SIZE - 5))
+        auto possibleUnicode = disasmispossiblestring(addr, &strtype) && strtype == str_unicode;
+        if(!possibleUnicode)
         {
-            if(int(strlen(string)) <= (strtype == str_ascii ? 3 : 2) && readValidPtr(addrPtr))
-                return false;
-            if(strtype == str_ascii)
-                sprintf_s(dest, MAX_STRING_SIZE, "&\"%s\"", string);
-            else //unicode
-                sprintf_s(dest, MAX_STRING_SIZE, "&L\"%s\"", string);
-            return true;
+            if(disasmgetstringat(addrPtr, &strtype, string, string, MAX_STRING_SIZE - 5))
+            {
+                if(int(strlen(string)) <= (strtype == str_ascii ? 3 : 2) && readValidPtr(addrPtr))
+                    return false;
+                if(strtype == str_ascii)
+                    sprintf_s(dest, MAX_STRING_SIZE, "&\"%s\"", string);
+                else //unicode
+                    sprintf_s(dest, MAX_STRING_SIZE, "&L\"%s\"", string);
+                return true;
+            }
         }
     }
     if(disasmgetstringat(addr, &strtype, string, string, MAX_STRING_SIZE - 4))

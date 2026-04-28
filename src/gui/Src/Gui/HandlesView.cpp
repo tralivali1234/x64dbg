@@ -115,12 +115,14 @@ HandlesView::HandlesView(QWidget* parent) : QWidget(parent)
     connect(mActionEnableWindow, SIGNAL(triggered()), this, SLOT(enableWindowSlot()));
     mActionDisableWindow = new QAction(DIcon("disable"), tr("Disable window"), this);
     connect(mActionDisableWindow, SIGNAL(triggered()), this, SLOT(disableWindowSlot()));
+    mActionFocusWindow = new QAction(DIcon("search"), tr("Focus on Window"), this);
+    connect(mActionFocusWindow, SIGNAL(triggered()), this, SLOT(focusWindowSlot()));
     mActionFollowProc = new QAction(DIcon(ArchValue("processor32", "processor64")), tr("Follow Proc in Disassembler"), this);
     connect(mActionFollowProc, SIGNAL(triggered()), this, SLOT(followInDisasmSlot()));
     mActionFollowProc->setShortcut(Qt::Key_Return);
+    mWindowsTable->addAction(mActionFollowProc);
     mActionFollowThread = new QAction(DIcon("arrow-threads"), tr("Follow in Threads"), this);
     connect(mActionFollowThread, SIGNAL(triggered()), this, SLOT(followInThreads()));
-    mWindowsTable->addAction(mActionFollowProc);
     mActionToggleProcBP = new QAction(DIcon("breakpoint_toggle"), tr("Toggle Breakpoint in Proc"), this);
     connect(mActionToggleProcBP, SIGNAL(triggered()), this, SLOT(toggleBPSlot()));
     mWindowsTable->addAction(mActionToggleProcBP);
@@ -134,15 +136,6 @@ HandlesView::HandlesView(QWidget* parent) : QWidget(parent)
     connect(mPrivilegesTable, SIGNAL(contextMenuSignal(const QPoint &)), this, SLOT(privilegesTableContextMenuSlot(const QPoint &)));
     connect(Config(), SIGNAL(shortcutsUpdated()), this, SLOT(refreshShortcuts()));
     connect(Bridge::getBridge(), SIGNAL(dbgStateChanged(DBGSTATE)), this, SLOT(dbgStateChanged(DBGSTATE)));
-
-#ifdef _WIN32 // This is only supported on Windows Vista or greater
-    if(!IsWindowsVistaOrGreater())
-#endif //_WIN32
-    {
-        mTcpConnectionsTable->setRowCount(1);
-        mTcpConnectionsTable->setCellContent(0, 0, tr("TCP Connection enumeration is only available on Windows Vista or greater."));
-        mTcpConnectionsTable->reloadData();
-    }
 
     mWindowsTable->setAccessibleName(tr("Windows"));
     mHandlesTable->setAccessibleName(tr("Handles"));
@@ -221,6 +214,7 @@ void HandlesView::windowsTableContextMenuSlot(QMenu* menu)
             mActionEnableWindow->setText(tr("Enable window"));
             menu->addAction(mActionEnableWindow);
         }
+        menu->addAction(mActionFocusWindow);
 
         menu->addAction(mActionFollowProc);
         menu->addAction(mActionFollowThread);
@@ -321,6 +315,21 @@ void HandlesView::disableWindowSlot()
 {
     DbgCmdExecDirect(QString("DisableWindow %1").arg(mWindowsTable->mCurList->getCellContent(mWindowsTable->mCurList->getInitialSelection(), 1)));
     enumWindows();
+}
+
+void HandlesView::focusWindowSlot()
+{
+    if(DbgIsDebugging())
+    {
+        if(!DbgIsRunning())
+        {
+            SimpleInfoBox(this, tr("Program is not running"), tr("The program must be running before its window can be focused."));
+            return;
+        }
+        HWND hWnd = (HWND)mWindowsTable->mCurList->getCellContent(mWindowsTable->mCurList->getInitialSelection(), 1).toULongLong(nullptr, 16);
+        if(hWnd)
+            SetForegroundWindow(hWnd);
+    }
 }
 
 void HandlesView::followInDisasmSlot()

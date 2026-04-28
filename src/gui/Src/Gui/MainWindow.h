@@ -50,7 +50,7 @@ public:
 
     void setupCommandBar();
     void setupStatusBar();
-    void closeEvent(QCloseEvent* event);
+    void closeEvent(QCloseEvent* event) override;
     void setTab(QWidget* widget);
     void loadTabDefaultOrder();
     void loadTabSavedOrder();
@@ -196,6 +196,7 @@ private:
     void onMenuCustomized();
     void setupMenuCustomization();
     QAction* makeCommandAction(QAction* action, const QString & command);
+    void showReleaseNotes(duint cutoffEpoch);
 
     //lists for menu customization
     QList<QAction*> mFileMenuStrings;
@@ -275,10 +276,12 @@ protected:
     void dragEnterEvent(QDragEnterEvent* pEvent) override;
     void dropEvent(QDropEvent* pEvent) override;
     bool event(QEvent* event) override;
+    bool nativeEvent(const QByteArray & eventType, void* message, long* result) override;
 
 private slots:
     void setupLanguagesMenu2();
     void updateStyle();
+    void updateFont();
 
     void on_actionFaq_triggered();
     void on_actionReloadStylesheet_triggered();
@@ -289,4 +292,5 @@ private slots:
     void on_actionCheckUpdates_triggered();
     void on_actionDefaultTheme_triggered();
     void on_actionAbout_Qt_triggered();
+    void on_actionReleaseNotes_triggered();
 };

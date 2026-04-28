@@ -3,7 +3,7 @@
 #include "StringUtil.h"
 #include "MiscUtil.h"
 #include "ldconvert.h"
-#include "Configuration.h"
+#include <Configuration.h>
 
 QString ToLongDoubleString(const void* buffer)
 {
@@ -180,6 +180,17 @@ QString composeRegTextYMM(const char* value, int mode)
         return composeRegTextXMM(value + 16, mode) + ' ' + composeRegTextXMM(value, mode);
 }
 
+QString composeRegTextZMM(const char* value, int mode)
+{
+    bool bFpuRegistersLittleEndian = ConfigBool("Gui", "FpuRegistersLittleEndian");
+    if(mode == 0)
+        return fillValue(value, 64, bFpuRegistersLittleEndian);
+    else if(bFpuRegistersLittleEndian)
+        return composeRegTextXMM(value, mode) + ' ' + composeRegTextXMM(value + 16, mode) + ' ' + composeRegTextXMM(value + 32, mode) + ' ' + composeRegTextXMM(value + 48, mode);
+    else
+        return composeRegTextXMM(value + 48, mode) + ' ' + composeRegTextXMM(value + 32, mode) + ' ' + composeRegTextXMM(value + 16, mode) + ' ' + composeRegTextXMM(value, mode);
+}
+
 QString GetDataTypeString(const void* buffer, duint size, ENCODETYPE type)
 {
     switch(type)
@@ -204,6 +215,8 @@ QString GetDataTypeString(const void* buffer, duint size, ENCODETYPE type)
         return composeRegTextXMM((const char*)buffer, ConfigUint("Gui", "SIMDRegistersDisplayMode"));
     case enc_ymmword:
         return composeRegTextYMM((const char*)buffer, ConfigUint("Gui", "SIMDRegistersDisplayMode"));
+    case enc_zmmword:
+        return composeRegTextZMM((const char*)buffer, ConfigUint("Gui", "SIMDRegistersDisplayMode"));
     case enc_real4:
         return ToFloatString(buffer);
     case enc_real8:
@@ -298,4 +311,14 @@ QString DbgCmdEscape(QString argument)
     argument.replace("{", "\\{");
 
     return argument;
+}
+
+QString StringFormatInline(const QString & format)
+{
+    if(!DbgFunctions()->StringFormatInline)
+        return QString();
+    char result[MAX_SETTING_SIZE] = "";
+    if(DbgFunctions()->StringFormatInline(format.toUtf8().constData(), MAX_SETTING_SIZE, result))
+        return result;
+    return "[Formatting Error]";
 }

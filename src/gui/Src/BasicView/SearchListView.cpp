@@ -111,8 +111,10 @@ SearchListView::SearchListView(QWidget* parent, AbstractSearchList* abstractSear
     // Slots
     connect(abstractSearchList->list(), SIGNAL(contextMenuSignal(QPoint)), this, SLOT(listContextMenu(QPoint)));
     connect(abstractSearchList->list(), SIGNAL(doubleClickedSignal()), this, SLOT(doubleClickedSlot()));
+    connect(abstractSearchList->list(), &AbstractStdTable::selectionChanged, this, &SearchListView::selectionChanged);
     connect(abstractSearchList->searchList(), SIGNAL(contextMenuSignal(QPoint)), this, SLOT(listContextMenu(QPoint)));
     connect(abstractSearchList->searchList(), SIGNAL(doubleClickedSignal()), this, SLOT(doubleClickedSlot()));
+    connect(abstractSearchList->searchList(), &AbstractStdTable::selectionChanged, this, &SearchListView::selectionChanged);
     connect(mSearchBox, SIGNAL(textEdited(QString)), this, SLOT(searchTextEdited(QString)));
     connect(mRegexCheckbox, SIGNAL(stateChanged(int)), this, SLOT(on_checkBoxRegex_stateChanged(int)));
     connect(mLockCheckbox, SIGNAL(toggled(bool)), mSearchBox, SLOT(setDisabled(bool)));
@@ -121,7 +123,6 @@ SearchListView::SearchListView(QWidget* parent, AbstractSearchList* abstractSear
     abstractSearchList->searchList()->setFocusProxy(mSearchBox);
     abstractSearchList->list()->setFocusProxy(mSearchBox);
 }
-
 
 void SearchListView::filterEntries()
 {
@@ -157,6 +158,8 @@ void SearchListView::filterEntries()
             break;
         case Qt::Checked:
             filterType = AbstractSearchList::FilterRegexCaseSensitive;
+            break;
+        default:
             break;
         }
         mAbstractSearchList->filter(filterText, filterType, mSearchStartCol);
@@ -232,14 +235,12 @@ void SearchListView::searchTextEdited(const QString & text)
     mAbstractSearchList->lock();
     mTypingTimer->setInterval([](dsint rowCount)
     {
-        // These numbers are kind of arbitrarily chosen, but seem to work
         if(rowCount <= 10000)
-            return 0;
-        else if(rowCount <= 600000)
-            return 100;
+            return 0;   // seems to be OK for up to 10000 rows
         else
-            return 350;
-    }(mAbstractSearchList->list()->getRowCount()));
+            return 250; // 250 ms between keypresses should be ok for the average user typing speed.
+    }
+    (mAbstractSearchList->list()->getRowCount()));
     mAbstractSearchList->unlock();
     mTypingTimer->start(); // This will fire filterEntries after interval ms.
     // If the user types something before it fires, the timer restarts counting
@@ -346,10 +347,11 @@ bool SearchListView::eventFilter(QObject* obj, QEvent* event)
             case Qt::Key_Insert:
                 return QWidget::eventFilter(obj, event);
             // Search box shortcuts reliant on mSearchBox not being empty
+            case Qt::Key_C: //Ctrl+C
             case Qt::Key_X: //Ctrl+X
-            case Qt::Key_A: //Ctrl+A
                 if(keyEvent->modifiers() == Qt::ControlModifier)
                     return QWidget::eventFilter(obj, event);
+                break;
             }
         }
         switch(key)
@@ -360,6 +362,11 @@ bool SearchListView::eventFilter(QObject* obj, QEvent* event)
         case Qt::Key_Y: //Ctrl+Y
             if(keyEvent->modifiers() == Qt::ControlModifier)
                 return QWidget::eventFilter(obj, event);
+            break;
+        case Qt::Key_Insert: //Shift+Insert
+            if(keyEvent->modifiers() == Qt::ShiftModifier)
+                return QWidget::eventFilter(obj, event);
+            break;
         }
         // Printable characters go to the search box
         QString keyText = keyEvent->text();

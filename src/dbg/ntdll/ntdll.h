@@ -1,7 +1,17 @@
-#ifndef NTDLL_H
-#define NTDLL_H
-
 #pragma once
+
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0601 // XP x64 is version 5.2, Vista is version 6.0, Windows 7 is version 6.1
+#endif // _WIN32_WINNT
+
+#ifdef WINVER // Overwrite WINVER if given on command line
+#undef WINVER
+#endif // WINVER
+#define WINVER _WIN32_WINNT
+
+#ifndef _WIN32_IE
+#define _WIN32_IE _WIN32_IE_WIN7
+#endif //_WIN32_IE
 
 #ifdef __cplusplus
 extern "C" {
@@ -3911,7 +3921,9 @@ typedef struct _TEB
 
     union
     {
+#if (_WIN32_WINNT >= 0x0601)
         PROCESSOR_NUMBER CurrentIdealProcessor;
+#endif
         ULONG IdealProcessorValue;
         struct
         {
@@ -7251,7 +7263,7 @@ NtAdjustGroupsToken(
     _In_ HANDLE TokenHandle,
     _In_ BOOLEAN ResetToDefault,
     _In_opt_ PTOKEN_GROUPS NewState,
-    _In_range_( >=, sizeof(TOKEN_GROUPS)) ULONG BufferLength,
+    _In_range_(>=, sizeof(TOKEN_GROUPS)) ULONG BufferLength,
     _Out_writes_bytes_to_opt_(BufferLength, *ReturnLength) PTOKEN_GROUPS PreviousState,
     _Out_ PULONG ReturnLength
 );
@@ -8931,7 +8943,7 @@ RtlDecompressFragment(
     _In_ ULONG UncompressedFragmentSize,
     _In_reads_bytes_(CompressedBufferSize) PUCHAR CompressedBuffer,
     _In_ ULONG CompressedBufferSize,
-    _In_range_( <, CompressedBufferSize) ULONG FragmentOffset,
+    _In_range_(<, CompressedBufferSize) ULONG FragmentOffset,
     _Out_ PULONG FinalUncompressedSize,
     _In_ PVOID WorkSpace
 );
@@ -8946,7 +8958,7 @@ RtlDecompressFragmentEx(
     _In_ ULONG UncompressedFragmentSize,
     _In_reads_bytes_(CompressedBufferSize) PUCHAR CompressedBuffer,
     _In_ ULONG CompressedBufferSize,
-    _In_range_( <, CompressedBufferSize) ULONG FragmentOffset,
+    _In_range_(<, CompressedBufferSize) ULONG FragmentOffset,
     _In_ ULONG UncompressedChunkSize,
     _Out_ PULONG FinalUncompressedSize,
     _In_ PVOID WorkSpace
@@ -8995,9 +9007,9 @@ RtlCompressChunks(
     _In_reads_bytes_(UncompressedBufferSize) PUCHAR UncompressedBuffer,
     _In_ ULONG UncompressedBufferSize,
     _Out_writes_bytes_(CompressedBufferSize) PUCHAR CompressedBuffer,
-    _In_range_( >=, (UncompressedBufferSize - (UncompressedBufferSize / 16))) ULONG CompressedBufferSize,
+    _In_range_(>=, (UncompressedBufferSize - (UncompressedBufferSize / 16))) ULONG CompressedBufferSize,
     _Inout_updates_bytes_(CompressedDataInfoLength) PCOMPRESSED_DATA_INFO CompressedDataInfo,
-    _In_range_( >, sizeof(COMPRESSED_DATA_INFO)) ULONG CompressedDataInfoLength,
+    _In_range_(>, sizeof(COMPRESSED_DATA_INFO)) ULONG CompressedDataInfoLength,
     _In_ PVOID WorkSpace
 );
 
@@ -9050,6 +9062,8 @@ RtlWalkHeap(
     _Inout_ PRTL_HEAP_WALK_ENTRY Entry
 );
 
+// NOTE: mingw had an incorrect definition for these
+#ifndef __MINGW32__
 NTSYSAPI
 NTSTATUS
 NTAPI
@@ -9070,6 +9084,7 @@ RtlSetHeapInformation(
     _In_opt_ PVOID HeapInformation,
     _In_opt_ SIZE_T HeapInformationLength
 );
+#endif // __MINGW__
 
 NTSYSAPI
 SIZE_T
@@ -9228,7 +9243,7 @@ RtlUniform(
     _Inout_ PULONG Seed
 );
 
-_Ret_range_( <=, MAXLONG)
+_Ret_range_(<=, MAXLONG)
 NTSYSAPI
 ULONG
 NTAPI
@@ -9236,7 +9251,7 @@ RtlRandom(
     _Inout_ PULONG Seed
 );
 
-_Ret_range_( <=, MAXLONG)
+_Ret_range_(<=, MAXLONG)
 NTSYSAPI
 ULONG
 NTAPI
@@ -11292,5 +11307,3 @@ TpAlpcUnregisterCompletionList(
 #ifdef __cplusplus
 }
 #endif
-
-#endif // NTDLL_H

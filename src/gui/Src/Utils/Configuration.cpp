@@ -1,4 +1,4 @@
-#include "Configuration.h"
+#include <Configuration.h>
 #include <QApplication>
 #include <QFontInfo>
 #include <QMessageBox>
@@ -217,6 +217,8 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
 
     defaultColors.insert("ThreadCurrentColor", QColor("#FFFFFF"));
     defaultColors.insert("ThreadCurrentBackgroundColor", QColor("#000000"));
+    defaultColors.insert("CallStackHighlightColor", QColor("#000000"));
+    defaultColors.insert("CallStackHighlightBackgroundColor", QColor("#FFF0A0"));
     defaultColors.insert("WatchTriggeredColor", QColor("#FF0000"));
     defaultColors.insert("WatchTriggeredBackgroundColor", QColor("#FFF8F0"));
     defaultColors.insert("MemoryMapBreakpointColor", QColor("#000000"));
@@ -244,6 +246,8 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     defaultColors.insert("LinkColor", QColor("#0000ff"));
     defaultColors.insert("LogColor", QColor("#000000"));
     defaultColors.insert("LogBackgroundColor", QColor("#FFF8F0"));
+    defaultColors.insert("TraceNewValueColor", QColor("#FF0000"));
+    defaultColors.insert("TraceNewValueBackgroundColor", Qt::transparent);
 
     //bool settings
     QMap<QString, bool> disassemblyBool;
@@ -261,15 +265,16 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     disassemblyBool.insert("LongDataInstruction", false);
     disassemblyBool.insert("NoHighlightOperands", false);
     disassemblyBool.insert("PermanentHighlightingMode", false);
-    disassemblyBool.insert("0xPrefixValues", false);
     disassemblyBool.insert("NoBranchDisasmPreview", false);
     disassemblyBool.insert("NoCurrentModuleText", false);
     disassemblyBool.insert("ShowMnemonicBrief", false);
+    disassemblyBool.insert("UseRunTrace", false);
     defaultBools.insert("Disassembler", disassemblyBool);
 
     QMap<QString, bool> engineBool;
     engineBool.insert("ListAllPages", false);
     engineBool.insert("ShowSuspectedCallStack", false);
+    engineBool.insert("NoConsoleWindow", false);
     defaultBools.insert("Engine", engineBool);
 
     QMap<QString, bool> miscBool;
@@ -286,6 +291,7 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     guiBool.insert("ShowGraphRva", false);
     guiBool.insert("GraphZoomMode", true);
     guiBool.insert("ShowExitConfirmation", false);
+    guiBool.insert("ShowAttachConfirmation", true);
     guiBool.insert("DisableAutoComplete", false);
     guiBool.insert("CaseSensitiveAutoComplete", false);
     guiBool.insert("AutoRepeatOnEnter", false);
@@ -296,7 +302,7 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     guiBool.insert("CPUStackStartFromSelect", true);
     guiBool.insert("AutoTraceDump", false);
     //Named menu settings
-    insertMenuBuilderBools(&guiBool, "CPUDisassembly", 50); //CPUDisassembly
+    insertMenuBuilderBools(&guiBool, "CPUDisassemblyV2", 50); //CPUDisassembly
     insertMenuBuilderBools(&guiBool, "CPUDump", 50); //CPUDump
     insertMenuBuilderBools(&guiBool, "WatchView", 50); //Watch
     insertMenuBuilderBools(&guiBool, "CallStackView", 50); //CallStackView
@@ -319,7 +325,7 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     defaultBools.insert("Gui", guiBool);
 
     QMap<QString, duint> guiUint;
-    AbstractTableView::setupColumnConfigDefaultValue(guiUint, "CPUDisassembly", 5);
+    AbstractTableView::setupColumnConfigDefaultValue(guiUint, "CPUDisassemblyV2", 5);
     AbstractTableView::setupColumnConfigDefaultValue(guiUint, "CPUStack", 3);
     for(int i = 1; i <= 5; i++)
         AbstractTableView::setupColumnConfigDefaultValue(guiUint, QString("CPUDump%1").arg(i), 4);
@@ -353,6 +359,7 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     defaultBools.insert("HexDump", hexdumpBool);
 
     QMap<QString, duint> disasmUint;
+    disasmUint.insert("0xPrefixValues", DisasmValueNotationNone);
     disasmUint.insert("MaxModuleSize", -1);
     defaultUints.insert("Disassembler", disasmUint);
 
@@ -431,7 +438,6 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     defaultShortcuts.insert("DebugTraceIntoConditional", Shortcut({tr("Debug"), tr("Trace into...")}, "Ctrl+Alt+F7", true));
     defaultShortcuts.insert("DebugTraceOverConditional", Shortcut({tr("Debug"), tr("Trace over...")}, "Ctrl+Alt+F8", true));
     defaultShortcuts.insert("DebugEnableTraceRecordBit", Shortcut({tr("Debug"), tr("Trace coverage"), tr("Bit")}, "", true));
-    defaultShortcuts.insert("DebugTraceRecordNone", Shortcut({tr("Debug"), tr("Trace coverage"), tr("None")}, "", true));
     defaultShortcuts.insert("DebugInstrUndo", Shortcut({tr("Debug"), tr("Undo instruction")}, "Alt+U", true));
     defaultShortcuts.insert("DebugAnimateInto", Shortcut({tr("Debug"), tr("Animate into")}, "Ctrl+F7", true));
     defaultShortcuts.insert("DebugAnimateOver", Shortcut({tr("Debug"), tr("Animate over")}, "Ctrl+F8", true));
@@ -440,6 +446,7 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     defaultShortcuts.insert("DebugTraceOverIntoTracerecord", Shortcut({tr("Debug"), tr("Step over until reaching uncovered code")}, "", true));
     defaultShortcuts.insert("DebugTraceIntoBeyondTracerecord", Shortcut({tr("Debug"), tr("Step into until reaching covered code")}, "", true));
     defaultShortcuts.insert("DebugTraceOverBeyondTracerecord", Shortcut({tr("Debug"), tr("Step over until reaching covered code")}, "", true));
+    defaultShortcuts.insert("DebugTraceRecordNone", Shortcut({ tr("Tracing"), tr("Trace coverage"), tr("Disable") }, "", true));
 
     defaultShortcuts.insert("PluginsScylla", Shortcut({tr("Plugins"), tr("Scylla")}, "Ctrl+I", true));
 
@@ -475,6 +482,11 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     defaultShortcuts.insert("ActionBinaryEdit", Shortcut({tr("Actions"), tr("Binary Edit")}, "Ctrl+E"));
     defaultShortcuts.insert("ActionBinaryFill", Shortcut({tr("Actions"), tr("Binary Fill")}, "F"));
     defaultShortcuts.insert("ActionBinaryFillNops", Shortcut({tr("Actions"), tr("Binary Fill NOPs")}, "Ctrl+9"));
+    defaultShortcuts.insert("ActionDumpViewHex", Shortcut({tr("Dump"), tr("Cycle Hex View")}, "Ctrl+H"));
+    defaultShortcuts.insert("ActionDumpViewText", Shortcut({tr("Dump"), tr("Cycle Text View")}, "Ctrl+T"));
+    defaultShortcuts.insert("ActionDumpViewInteger", Shortcut({tr("Dump"), tr("Cycle Integer View")}, "Ctrl+N"));
+    defaultShortcuts.insert("ActionDumpViewFloat", Shortcut({tr("Dump"), tr("Cycle Float View")}, "Ctrl+F"));
+    defaultShortcuts.insert("ActionDumpViewAddress", Shortcut({tr("Dump"), tr("Cycle Address View")}, "Ctrl+A"));
     defaultShortcuts.insert("ActionBinaryCopy", Shortcut({tr("Actions"), tr("Binary Copy")}, "Shift+C"));
     defaultShortcuts.insert("ActionBinaryPaste", Shortcut({tr("Actions"), tr("Binary Paste")}, "Shift+V"));
     defaultShortcuts.insert("ActionBinaryPasteIgnoreSize", Shortcut({tr("Actions"), tr("Binary Paste (Ignore Size)")}, "Ctrl+Shift+V"));
@@ -541,6 +553,7 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     defaultShortcuts.insert("ActionTreatSelectionAsMMWord", Shortcut({tr("Actions"), tr("Treat Selection As"), tr("MMWord")}, ""));
     defaultShortcuts.insert("ActionTreatSelectionAsXMMWord", Shortcut({tr("Actions"), tr("Treat Selection As"), tr("XMMWord")}, ""));
     defaultShortcuts.insert("ActionTreatSelectionAsYMMWord", Shortcut({tr("Actions"), tr("Treat Selection As"), tr("YMMWord")}, ""));
+    defaultShortcuts.insert("ActionTreatSelectionAsZMMWord", Shortcut({tr("Actions"), tr("Treat Selection As"), tr("ZMMWord")}, ""));
     defaultShortcuts.insert("ActionTreatSelectionHeadAsCode", Shortcut({tr("Actions"), tr("Treat Selection Head As"), tr("Code")}, ""));
     defaultShortcuts.insert("ActionTreatSelectionHeadAsByte", Shortcut({tr("Actions"), tr("Treat Selection Head As"), tr("Byte")}, ""));
     defaultShortcuts.insert("ActionTreatSelectionHeadAsWord", Shortcut({tr("Actions"), tr("Treat Selection Head As"), tr("Word")}, ""));
@@ -557,13 +570,16 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     defaultShortcuts.insert("ActionTreatSelectionHeadAsMMWord", Shortcut({tr("Actions"), tr("Treat Selection Head As"), tr("MMWord")}, ""));
     defaultShortcuts.insert("ActionTreatSelectionHeadAsXMMWord", Shortcut({tr("Actions"), tr("Treat Selection Head As"), tr("XMMWord")}, ""));
     defaultShortcuts.insert("ActionTreatSelectionHeadAsYMMWord", Shortcut({tr("Actions"), tr("Treat Selection Head As"), tr("YMMWord")}, ""));
+    defaultShortcuts.insert("ActionTreatSelectionHeadAsZMMWord", Shortcut({tr("Actions"), tr("Treat Selection Head As"), tr("ZMMWord")}, ""));
     defaultShortcuts.insert("ActionToggleRegisterValue", Shortcut({tr("Actions"), tr("Toggle Register Value")}, "Space"));
     defaultShortcuts.insert("ActionClear", Shortcut({tr("Actions"), tr("Clear")}, "Ctrl+L"));
     defaultShortcuts.insert("ActionCopy", Shortcut({tr("Actions"), tr("Copy")}, "Ctrl+C"));
+    defaultShortcuts.insert("ActionCopyReferenceAddress", Shortcut({tr("Actions"), tr("Copy Reference Address")}, "Ctrl+Shift+C"));
     defaultShortcuts.insert("ActionCopyAddress", Shortcut({tr("Actions"), tr("Copy Address")}, "Alt+INS"));
     defaultShortcuts.insert("ActionCopyRva", Shortcut({tr("Actions"), tr("Copy RVA")}, ""));
     defaultShortcuts.insert("ActionCopySymbol", Shortcut({tr("Actions"), tr("Copy Symbol")}, "Ctrl+S"));
     defaultShortcuts.insert("ActionCopyLine", Shortcut({tr("Actions"), tr("Copy Line")}, ""));
+    defaultShortcuts.insert("ActionCopyDisassembly", Shortcut({ tr("Actions"), tr("Copy Disassembly") }, ""));
     defaultShortcuts.insert("ActionLoadScript", Shortcut({tr("Actions"), tr("Load Script")}, "Ctrl+O"));
     defaultShortcuts.insert("ActionReloadScript", Shortcut({tr("Actions"), tr("Reload Script")}, "Ctrl+R"));
     defaultShortcuts.insert("ActionUnloadScript", Shortcut({tr("Actions"), tr("Unload Script")}, "Ctrl+U"));
@@ -579,6 +595,7 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     defaultShortcuts.insert("ActionGraphZoomToCursor", Shortcut({tr("Actions"), tr("Graph"), tr("Zoom to cursor")}, "Z"));
     defaultShortcuts.insert("ActionGraphFitToWindow", Shortcut({tr("Actions"), tr("Graph"), tr("Fit To Window")}, "Shift+Z"));
     defaultShortcuts.insert("ActionGraphFollowDisassembler", Shortcut({tr("Actions"), tr("Graph"), tr("Follow in disassembler")}, "Shift+Return"));
+    defaultShortcuts.insert("ActionGraphCopyImage", Shortcut({tr("Actions"), tr("Graph"), tr("Copy image")}, ""));
     defaultShortcuts.insert("ActionGraphSaveImage", Shortcut({tr("Actions"), tr("Graph"), tr("Save as image")}, "I"));
     defaultShortcuts.insert("ActionGraphToggleOverview", Shortcut({tr("Actions"), tr("Graph"), tr("Toggle overview")}, "O"));
     defaultShortcuts.insert("ActionGraphToggleSummary", Shortcut({tr("Actions"), tr("Graph"), tr("Toggle summary")}, "U"));
@@ -595,6 +612,7 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     defaultShortcuts.insert("ActionFollowDisasm", Shortcut({tr("Actions"), tr("Follow in Disassembler")}));
     defaultShortcuts.insert("ActionFollowDwordQwordDisasm", Shortcut({tr("Actions"), tr("Follow DWORD/QWORD in Disassembler")}));
     defaultShortcuts.insert("ActionFollowDwordQwordDump", Shortcut({tr("Actions"), tr("Follow DWORD/QWORD in Dump")}));
+    defaultShortcuts.insert("ActionDisplayType", Shortcut({tr("Actions"), tr("Display type")}));
     defaultShortcuts.insert("ActionFreezeStack", Shortcut({tr("Actions"), tr("Freeze the stack")}));
     defaultShortcuts.insert("ActionGotoBaseOfStackFrame", Shortcut({tr("Actions"), tr("Go to Base of Stack Frame")}));
     defaultShortcuts.insert("ActionGotoPrevStackFrame", Shortcut({tr("Actions"), tr("Go to Previous Stack Frame")}));

@@ -10,6 +10,8 @@
 #include "debugger.h"
 #include "threading.h"
 #include "murmurhash.h"
+#include "stringutils.h"
+#include "testing.h"
 
 ///debugger plugin exports (wrappers)
 PLUG_IMPEXP void _plugin_registercallback(int pluginHandle, CBTYPE cbType, CBPLUGIN cbPlugin)
@@ -150,7 +152,7 @@ PLUG_IMPEXP void _plugin_startscript(CBPLUGINSCRIPT cbScript)
 
 PLUG_IMPEXP bool _plugin_waituntilpaused()
 {
-    while(DbgIsDebugging() && dbgisrunning()) //wait until the debugger paused
+    while(bIsDebugging && dbgisrunning()) //wait until the debugger paused
     {
         Sleep(1);
         GuiProcessEvents(); //workaround for scripts being executed on the GUI thread
@@ -185,7 +187,7 @@ PLUG_IMPEXP bool _plugin_load(const char* pluginName)
 
 duint _plugin_hash(const void* data, duint size)
 {
-    return murmurhash(data, int(size));
+    return murmurhash(data, (size_t)size);
 }
 
 PLUG_IMPEXP bool _plugin_registerformatfunction(int pluginHandle, const char* type, CBPLUGINFORMATFUNCTION cbFunction, void* userdata)
@@ -196,4 +198,15 @@ PLUG_IMPEXP bool _plugin_registerformatfunction(int pluginHandle, const char* ty
 PLUG_IMPEXP bool _plugin_unregisterformatfunction(int pluginHandle, const char* type)
 {
     return pluginformatfuncunregister(pluginHandle, type);
+}
+
+PLUG_IMPEXP bool _plugin_testassert(bool condition, const char* format, ...)
+{
+    if(!TestIsEnabled())
+        return condition;
+    va_list args;
+    va_start(args, format);
+    auto message = StringUtils::vsprintf(format, args);
+    va_end(args);
+    return TestAssertPlugin(condition, message.c_str());
 }

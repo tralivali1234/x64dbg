@@ -334,8 +334,28 @@ void AppearanceDialog::on_listColorNames_itemSelectionChanged()
     }
     else
         ui->editBackgroundColor->setText("#FFFFFF");
-}
 
+    // Ensure the Example Text background color is always updated
+    QString textColor = ui->editColor->text();
+    QString backgroundColor = ui->editBackgroundColor->text();
+    if(backgroundColor == "#XXXXXX")
+    {
+        backgroundColor = "transparent";
+    }
+    if(QColor(textColor).isValid() && QColor(backgroundColor).isValid())
+    {
+        ui->exampleText->setStyleSheet(QString("color: %1; background-color: %2").arg(textColor).arg(backgroundColor));
+    }
+    else if(QColor(textColor).isValid())
+    {
+        ui->exampleText->setStyleSheet(QString("color: %1").arg(textColor));
+    }
+    else
+    {
+        ui->exampleText->setStyleSheet("color: black");
+    }
+    ui->exampleText->setFont(ConfigFont(colorInfoList.at(colorInfoIndex).defaultFontName));
+}
 void AppearanceDialog::on_buttonSave_clicked()
 {
     Config()->writeColors();
@@ -508,6 +528,7 @@ void AppearanceDialog::colorInfoListInit()
     colorInfoListAppend(tr("Addresses"), "InstructionAddressColor", "InstructionAddressBackgroundColor");
     colorInfoListAppend(tr("Values"), "InstructionValueColor", "InstructionValueBackgroundColor");
     colorInfoListAppend(tr("Commas"), "InstructionCommaColor", "InstructionCommaBackgroundColor");
+    colorInfoListAppend(tr("New Values (Trace View)"), "TraceNewValueColor", "TraceNewValueBackgroundColor");
 
     colorInfoListAppend(tr("General Registers"), "InstructionGeneralRegisterColor", "InstructionGeneralRegisterBackgroundColor");
     colorInfoListAppend(tr("FPU Registers"), "InstructionFpuRegisterColor", "InstructionFpuRegisterBackgroundColor");
@@ -591,6 +612,7 @@ void AppearanceDialog::colorInfoListInit()
     colorInfoListAppend(tr("Search Highlight Color"), "SearchListViewHighlightColor", "SearchListViewHighlightBackgroundColor");
     colorInfoListAppend(tr("Patch located in relocation region"), "PatchRelocatedByteHighlightColor", "");
     colorInfoListAppend(tr("Current Thread"), "ThreadCurrentColor", "ThreadCurrentBackgroundColor");
+    colorInfoListAppend(tr("Call Stack Highlight"), "CallStackHighlightColor", "CallStackHighlightBackgroundColor");
     colorInfoListAppend(tr("Watch (When Watchdog is Triggered)"), "WatchTriggeredColor", "WatchTriggeredBackgroundColor");
     colorInfoListAppend(tr("Memory Map Breakpoint"), "MemoryMapBreakpointColor", "MemoryMapBreakpointBackgroundColor");
     colorInfoListAppend(tr("Memory Map %1").arg(ArchValue(tr("EIP"), tr("RIP"))), "MemoryMapCipColor", "MemoryMapCipBackgroundColor");

@@ -4,6 +4,7 @@
 #include "MiscUtil.h"
 #include "Configuration.h"
 #include "BrowseDialog.h"
+#include <QLineEdit>
 
 EditBreakpointDialog::EditBreakpointDialog(QWidget* parent, const Breakpoints::Data & bp)
     : QDialog(parent),
@@ -13,6 +14,8 @@ EditBreakpointDialog::EditBreakpointDialog(QWidget* parent, const Breakpoints::D
     ui->setupUi(this);
     setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
     setFixedHeight(sizeHint().height()); // resizable only horizontally
+
+    ui->labelBreakCondition->setText(QString("<a href=\"https://help.x64dbg.com/en/latest/introduction/ConditionalBreakpoint.html\">%1</a>:").arg(ui->labelBreakCondition->text().replace(":", "")));
 
     switch(bp.type)
     {
@@ -36,9 +39,13 @@ EditBreakpointDialog::EditBreakpointDialog(QWidget* parent, const Breakpoints::D
         break;
     }
     setWindowIcon(DIcon("breakpoint"));
-    loadFromBp();
 
     connect(this, SIGNAL(accepted()), this, SLOT(acceptedSlot()));
+    connect(ui->editBreakCondition, SIGNAL(textChanged(QString)), this, SLOT(onExpressionChanged(QString)));
+    connect(ui->editLogCondition, SIGNAL(textChanged(QString)), this, SLOT(onExpressionChanged(QString)));
+    connect(ui->editCommandCondition, SIGNAL(textChanged(QString)), this, SLOT(onExpressionChanged(QString)));
+
+    loadFromBp();
 
     Config()->loadWindowGeometry(this);
 }
@@ -102,4 +109,27 @@ void EditBreakpointDialog::acceptedSlot()
     mBp.silent = ui->checkBoxSilent->isChecked();
     mBp.fastResume = ui->checkBoxFastResume->isChecked();
     mBp.logFile = mLogFile;
+}
+
+void EditBreakpointDialog::onExpressionChanged(const QString & text)
+{
+    QLineEdit* edit = qobject_cast<QLineEdit*>(sender());
+    if(edit)
+        updateExpressionStyle(edit, text);
+}
+
+void EditBreakpointDialog::updateExpressionStyle(QLineEdit* edit, const QString & text)
+{
+    if(text.isEmpty() || !DbgIsDebugging())
+    {
+        edit->setStyleSheet("");
+    }
+    else if(DbgIsValidExpression(text.toUtf8().constData()))
+    {
+        edit->setStyleSheet("QLineEdit { border: 1px solid #00DD00; }");
+    }
+    else
+    {
+        edit->setStyleSheet("QLineEdit { border: 1px solid red; }");
+    }
 }

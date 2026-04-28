@@ -10,6 +10,8 @@
 #include <QDebug>
 #include <QDir>
 #include "MiscUtil.h"
+#include <dwmapi.h>
+#include "Accessible/Accessible.h"
 
 MyApplication::MyApplication(int & argc, char** argv)
     : QApplication(argc, argv)
@@ -28,6 +30,21 @@ bool MyApplication::globalEventFilter(void* message)
 }
 #endif
 
+static void invalidateParentThumbnail(QDialog* dialog)
+{
+    // Find the top-level parent window
+    auto parent = dialog->parentWidget();
+    while(parent && parent->parentWidget())
+    {
+        parent = parent->parentWidget();
+    }
+
+    if(parent && parent->windowHandle())
+    {
+        DwmInvalidateIconicBitmaps((HWND)parent->winId());
+    }
+}
+
 bool MyApplication::notify(QObject* receiver, QEvent* event)
 {
     bool done = true;
@@ -41,7 +58,20 @@ bool MyApplication::notify(QObject* receiver, QEvent* event)
                 MainWindow::updateDarkTitleBar(widget);
             }
         }
+
         done = QApplication::notify(receiver, event);
+
+        // Fix stale taskbar preview thumbnails after closing child windows.
+        // Windows DWM caches the preview bitmap while hovering the taskbar, but Qt
+        // doesn't notify DWM when modal dialogs close, leaving the cached thumbnail
+        // showing the now-closed dialog. Force DWM to refresh by invalidating it.
+        if(event->type() == QEvent::Hide)
+        {
+            if(auto dialog = qobject_cast<QDialog*>(receiver))
+            {
+                invalidateParentThumbnail(dialog);
+            }
+        }
     }
     catch(const std::exception & ex)
     {
@@ -62,9 +92,8 @@ bool MyApplication::notify(QObject* receiver, QEvent* event)
 
 static Configuration* mConfiguration;
 char gCurrentLocale[MAX_SETTING_SIZE] = "";
-// Boom... VS does not support "thread_local"... and cannot use "__declspec(thread)" in a DLL... https://blogs.msdn.microsoft.com/oldnewthing/20101122-00/?p=12233
-// Simulating Thread Local Storage with a map...
-std::map<DWORD, TranslatedStringStorage>* TLS_TranslatedStringMap; //key = Thread Id, value = Translate Buffer
+
+thread_local TranslatedStringStorage TLS_TranslatedString;
 
 static bool isValidLocale(const QString & locale)
 {
@@ -131,7 +160,7 @@ static void handleHighDpiScaling()
         setDpiUnaware();
 
         // These options don't seem to do anything, but the Qt documentation recommends it
-        putenv("QT_AUTO_SCREEN_SCALE_FACTOR=1");
+        _putenv("QT_AUTO_SCREEN_SCALE_FACTOR=1");
         QCoreApplication::setAttribute(Qt::AA_DisableHighDpiScaling);
     }
 }
@@ -168,7 +197,8 @@ int main(int argc, char* argv[])
     if(x64dbgTranslator.load(QString("x64dbg_%1").arg(gCurrentLocale), path))
         application.installTranslator(&x64dbgTranslator);
 
-    TLS_TranslatedStringMap = new std::map<DWORD, TranslatedStringStorage>();
+    // Load accessibility classes
+    QAccessible::installFactory(accessibleInterfaceFactory);
 
     // load config file + set config font
     mConfiguration = new Configuration;
@@ -230,12 +260,6 @@ int main(int argc, char* argv[])
 #endif
     delete mainWindow;
     mConfiguration->save(); //save config on exit
-    {
-        //delete tls
-        auto temp = TLS_TranslatedStringMap;
-        TLS_TranslatedStringMap = nullptr;
-        delete temp;
-    }
 
     //TODO free Zydis/config/bridge and prevent use after free.
 
